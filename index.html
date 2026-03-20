@@ -146,6 +146,13 @@
     .install-banner-btn { background:white; color:#27ae60; padding:8px 12px; border-radius:8px; border:none; font-weight:900; cursor:pointer; font-size:13px; }
     .install-banner-close { background:transparent; border:none; color:white; font-size:20px; cursor:pointer; padding:0 4px; }
 
+    /* MINI MODAL — nuevo perfil */
+    .mini-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:10000; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .mini-modal-bg.hidden { display:none !important; }
+    .mini-modal { background:white; border-radius:12px; padding:24px; width:min(420px,96vw); box-shadow:0 10px 30px rgba(0,0,0,.2); }
+    .mini-modal h3 { font-size:16px; font-weight:900; color:#1a5276; margin-bottom:16px; }
+    .mini-modal-actions { display:flex; gap:10px; margin-top:16px; justify-content:flex-end; }
+
     /* FOOTER */
     .footer { background:white; padding:18px; border-radius:12px; margin-top:18px; box-shadow:0 4px 6px rgba(0,0,0,.1); text-align:center; }
     .footer-text { color:#666; font-size:13px; margin-bottom:12px; line-height:1.6; }
@@ -391,6 +398,34 @@
         <button class="btn secondary" type="button" onclick="fillOcrDemo()">🧪 Demo (Mercadona)</button>
       </div>
       <div id="ocrItemsPreview" class="ocr-items-preview hidden"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Confirmación genérica (borrar, reset) -->
+<div id="confirmModal" class="mini-modal-bg hidden">
+  <div class="mini-modal">
+    <h3 id="confirmTitle">¿Estás seguro?</h3>
+    <p id="confirmMsg" style="font-size:14px;color:#555;margin-bottom:0;"></p>
+    <div class="mini-modal-actions">
+      <button class="btn secondary" type="button" onclick="closeConfirmModal()">Cancelar</button>
+      <button class="btn danger" type="button" id="confirmOkBtn" onclick="runConfirmAction()">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nuevo perfil -->
+<div id="profileModal" class="mini-modal-bg hidden" onclick="closeProfileModal(event)">
+  <div class="mini-modal">
+    <h3>👤 Nuevo perfil</h3>
+    <div class="form-group" style="margin-bottom:0;">
+      <label>Nombre</label>
+      <input type="text" id="profileNameInput" placeholder="Ej: Arancha, Familia, Alberto..."
+             maxlength="40" onkeydown="if(event.key==='Enter')confirmAddProfile()">
+    </div>
+    <div class="mini-modal-actions">
+      <button class="btn secondary" type="button" onclick="closeProfileModal()">Cancelar</button>
+      <button class="btn" type="button" onclick="confirmAddProfile()">✅ Crear perfil</button>
     </div>
   </div>
 </div>
@@ -652,10 +687,38 @@ function showTab(name, btn) {
 /******************************************************************
  * PROFILE MANAGEMENT
  ******************************************************************/
+/* ── Modal de confirmación genérico ────────────────── */
+let _confirmAction = null;
+function showConfirm(title, msg, okLabel, onOk) {
+  document.getElementById("confirmTitle").textContent = title;
+  document.getElementById("confirmMsg").textContent   = msg;
+  document.getElementById("confirmOkBtn").textContent = okLabel;
+  _confirmAction = onOk;
+  document.getElementById("confirmModal").classList.remove("hidden");
+}
+function closeConfirmModal() {
+  document.getElementById("confirmModal").classList.add("hidden");
+  _confirmAction = null;
+}
+function runConfirmAction() {
+  closeConfirmModal();
+  if (_confirmAction) _confirmAction();
+}
+
 function addProfile() {
-  const name = prompt("Nombre del perfil (ej: Arancha, Familia, Alberto...):");
-  if (!name || !name.trim()) return;
-  const p = { id:uid(), name:name.trim(), createdAt:new Date().toISOString() };
+  document.getElementById("profileNameInput").value = "";
+  document.getElementById("profileModal").classList.remove("hidden");
+  setTimeout(() => document.getElementById("profileNameInput").focus(), 80);
+}
+function closeProfileModal(e) {
+  if (e && e.target !== document.getElementById("profileModal")) return;
+  document.getElementById("profileModal").classList.add("hidden");
+}
+function confirmAddProfile() {
+  const name = document.getElementById("profileNameInput").value.trim();
+  if (!name) { document.getElementById("profileNameInput").focus(); return; }
+  document.getElementById("profileModal").classList.add("hidden");
+  const p = { id:uid(), name, createdAt:new Date().toISOString() };
   profiles.push(p);
   saveProfiles();
   selectedProfileId = p.id;
@@ -874,11 +937,17 @@ function editTrip(id) {
 }
 
 function deleteTrip(id) {
-  if (!confirm("¿Eliminar esta compra? No se puede deshacer.")) return;
-  trips = trips.filter(t => t.id !== id);
-  priceAlerts = priceAlerts.filter(a => a.tripId !== id);
-  saveTrips(); saveAlerts();
-  refreshAll();
+  showConfirm(
+    "🗑️ Eliminar compra",
+    "Esta acción no se puede deshacer.",
+    "🗑️ Eliminar",
+    () => {
+      trips = trips.filter(t => t.id !== id);
+      priceAlerts = priceAlerts.filter(a => a.tripId !== id);
+      saveTrips(); saveAlerts();
+      refreshAll();
+    }
+  );
 }
 
 /******************************************************************
@@ -1190,13 +1259,19 @@ function importFromExcel(event) {
  * RESET
  ******************************************************************/
 function resetAllConfirm() {
-  if (!confirm("¿Borrar TODOS los datos? Esta acción no se puede deshacer.")) return;
-  [STORAGE_KEYS.profiles, STORAGE_KEYS.trips, STORAGE_KEYS.alerts, STORAGE_KEYS.ui]
-    .forEach(k => localStorage.removeItem(k));
-  profiles=[]; trips=[]; priceAlerts=[];
-  selectedProfileId=null; selectedPeriod="month"; selectedSupermarketFilter="all";
-  editingTripId=null; currentItems=[]; editingItemIdx=null;
-  loadAll();
+  showConfirm(
+    "🧨 Reset completo",
+    "Se borrarán TODOS los perfiles, compras y alertas. Esta acción no se puede deshacer.",
+    "🧨 Borrar todo",
+    () => {
+      [STORAGE_KEYS.profiles, STORAGE_KEYS.trips, STORAGE_KEYS.alerts, STORAGE_KEYS.ui]
+        .forEach(k => localStorage.removeItem(k));
+      profiles=[]; trips=[]; priceAlerts=[];
+      selectedProfileId=null; selectedPeriod="month"; selectedSupermarketFilter="all";
+      editingTripId=null; currentItems=[]; editingItemIdx=null;
+      loadAll();
+    }
+  );
 }
 
 /******************************************************************
