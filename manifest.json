@@ -1,0 +1,37 @@
+{
+  "name": "Control de Gastos Supermercado",
+  "short_name": "Gastos Super",
+  "description": "Controla tus gastos del supermercado. Compara precios entre supermercados y analiza tu gasto por categorías.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1a5276",
+  "theme_color": "#1a5276",
+  "lang": "es",
+  "categories": ["finance", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Nueva compra",
+      "short_name": "Nueva",
+      "description": "Añadir una nueva compra",
+      "url": "/?tab=add",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
