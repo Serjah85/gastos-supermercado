@@ -146,7 +146,13 @@
     .install-banner-btn { background:white; color:#27ae60; padding:8px 12px; border-radius:8px; border:none; font-weight:900; cursor:pointer; font-size:13px; }
     .install-banner-close { background:transparent; border:none; color:white; font-size:20px; cursor:pointer; padding:0 4px; }
 
-    /* MINI MODAL — nuevo perfil */
+    /* PANEL INLINE — gestión de perfiles */
+    .profile-panel { background:#eaf4fb; border:2px solid #aed6f1; border-radius:10px; padding:14px 16px; margin-top:12px; }
+    .profile-panel h4 { font-size:13px; font-weight:800; color:#1a5276; margin-bottom:10px; }
+    .profile-panel-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .profile-panel-row input { max-width:220px; padding:8px 10px; font-size:13px; }
+
+    /* MINI MODAL — genérico (solo confirmaciones) */
     .mini-modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:10000; display:flex; align-items:center; justify-content:center; padding:20px; }
     .mini-modal-bg.hidden { display:none !important; }
     .mini-modal { background:white; border-radius:12px; padding:24px; width:min(420px,96vw); box-shadow:0 10px 30px rgba(0,0,0,.2); }
@@ -215,8 +221,23 @@
         </select>
       </div>
       <div class="form-group" style="margin-bottom:0;">
-        <button class="btn secondary" type="button" onclick="addProfile()">➕ Nuevo perfil</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn secondary" type="button" onclick="toggleProfilePanel('new')">➕ Nuevo perfil</button>
+          <button class="btn secondary" type="button" onclick="toggleProfilePanel('rename')">✏️ Renombrar</button>
+        </div>
       </div>
+    </div>
+
+    <!-- PANEL INLINE: crear / renombrar perfil -->
+    <div id="profilePanel" class="profile-panel hidden">
+      <h4 id="profilePanelTitle">➕ Nuevo perfil</h4>
+      <div class="profile-panel-row">
+        <input type="text" id="profileNameInput" placeholder="Nombre del perfil (ej: Arancha)..."
+               maxlength="40" onkeydown="if(event.key==='Enter'){event.preventDefault();saveProfilePanel();}">
+        <button class="btn small" type="button" onclick="saveProfilePanel()">✅ Guardar</button>
+        <button class="btn secondary small" type="button" onclick="closeProfilePanel()">Cancelar</button>
+      </div>
+      <div id="profilePanelError" style="color:#e74c3c;font-size:12px;margin-top:6px;min-height:16px;"></div>
     </div>
   </div>
 
@@ -410,22 +431,6 @@
     <div class="mini-modal-actions">
       <button class="btn secondary" type="button" onclick="closeConfirmModal()">Cancelar</button>
       <button class="btn danger" type="button" id="confirmOkBtn" onclick="runConfirmAction()">Eliminar</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL: Nuevo perfil -->
-<div id="profileModal" class="mini-modal-bg hidden" onclick="closeProfileModal(event)">
-  <div class="mini-modal">
-    <h3>👤 Nuevo perfil</h3>
-    <div class="form-group" style="margin-bottom:0;">
-      <label>Nombre</label>
-      <input type="text" id="profileNameInput" placeholder="Ej: Arancha, Familia, Alberto..."
-             maxlength="40" onkeydown="if(event.key==='Enter')confirmAddProfile()">
-    </div>
-    <div class="mini-modal-actions">
-      <button class="btn secondary" type="button" onclick="closeProfileModal()">Cancelar</button>
-      <button class="btn" type="button" onclick="confirmAddProfile()">✅ Crear perfil</button>
     </div>
   </div>
 </div>
@@ -705,27 +710,81 @@ function runConfirmAction() {
   if (_confirmAction) _confirmAction();
 }
 
-function addProfile() {
-  document.getElementById("profileNameInput").value = "";
-  document.getElementById("profileModal").classList.remove("hidden");
-  setTimeout(() => document.getElementById("profileNameInput").focus(), 80);
+/* ── Gestión de perfiles (panel inline) ─────────────── */
+let _profilePanelMode = "new"; // "new" | "rename"
+
+function toggleProfilePanel(mode) {
+  const panel     = document.getElementById("profilePanel");
+  const input     = document.getElementById("profileNameInput");
+  const title     = document.getElementById("profilePanelTitle");
+  const errEl     = document.getElementById("profilePanelError");
+  const isVisible = !panel.classList.contains("hidden");
+
+  // Si ya está visible en el mismo modo, lo cierra
+  if (isVisible && _profilePanelMode === mode) {
+    closeProfilePanel();
+    return;
+  }
+
+  _profilePanelMode = mode;
+  errEl.textContent = "";
+
+  if (mode === "new") {
+    title.textContent = "➕ Nuevo perfil";
+    input.value = "";
+    input.placeholder = "Nombre del perfil (ej: Arancha)...";
+  } else {
+    title.textContent = "✏️ Renombrar perfil actual";
+    const current = profiles.find(p => p.id === selectedProfileId);
+    input.value = current ? current.name : "";
+    input.placeholder = "Nuevo nombre...";
+  }
+
+  panel.classList.remove("hidden");
+  // Scroll al panel y foco al input
+  setTimeout(() => {
+    panel.scrollIntoView({ behavior:"smooth", block:"nearest" });
+    input.focus();
+    input.select();
+  }, 50);
 }
-function closeProfileModal(e) {
-  if (e && e.target !== document.getElementById("profileModal")) return;
-  document.getElementById("profileModal").classList.add("hidden");
+
+function closeProfilePanel() {
+  document.getElementById("profilePanel").classList.add("hidden");
+  document.getElementById("profilePanelError").textContent = "";
 }
-function confirmAddProfile() {
-  const name = document.getElementById("profileNameInput").value.trim();
-  if (!name) { document.getElementById("profileNameInput").focus(); return; }
-  document.getElementById("profileModal").classList.add("hidden");
-  const p = { id:uid(), name, createdAt:new Date().toISOString() };
-  profiles.push(p);
-  saveProfiles();
-  selectedProfileId = p.id;
+
+function saveProfilePanel() {
+  const input = document.getElementById("profileNameInput");
+  const name  = input.value.trim();
+  const errEl = document.getElementById("profilePanelError");
+
+  if (!name) {
+    errEl.textContent = "Escribe un nombre para continuar.";
+    input.focus();
+    return;
+  }
+
+  errEl.textContent = "";
+
+  if (_profilePanelMode === "new") {
+    const p = { id:uid(), name, createdAt:new Date().toISOString() };
+    profiles.push(p);
+    saveProfiles();
+    selectedProfileId = p.id;
+  } else {
+    const idx = profiles.findIndex(p => p.id === selectedProfileId);
+    if (idx >= 0) {
+      profiles[idx].name = name;
+      saveProfiles();
+    }
+  }
+
   saveUI();
   buildProfileSelect();
   refreshAll();
-  resetTripForm();
+  closeProfilePanel();
+  if (_profilePanelMode === "new") resetTripForm();
 }
 
 /******************************************************************
