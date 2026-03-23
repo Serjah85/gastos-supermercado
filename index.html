@@ -294,7 +294,7 @@
   </div>
 </div>
 
-<input type="file" id="ocrFile" accept="image/*" capture="environment" onchange="handleOCRFile(event)">
+<input type="file" id="ocrFile" accept="image/*" onchange="handleOCRFile(event)">
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script>
 var SK={p:"gs_p_v2",t:"gs_t_v2",a:"gs_a_v2",u:"gs_u_v2"};
@@ -418,7 +418,7 @@ function savePP(){
 document.addEventListener("keydown",function(e){if(e.key==="Enter"){var pan=document.getElementById("pp");if(pan&&!pan.classList.contains("hidden")&&document.activeElement&&document.activeElement.id==="ppInput"){e.preventDefault();savePP()}}});
 function showConf(t,m,l,cb){document.getElementById("confTitle").textContent=t;document.getElementById("confMsg").textContent=m;document.getElementById("confOk").textContent=l;confCb=cb;document.getElementById("confirmModal").classList.remove("hidden")}
 function closeConf(){document.getElementById("confirmModal").classList.add("hidden");confCb=null}
-function runConf(){closeConf();if(confCb)confCb()}
+function runConf(){var cb=confCb;closeConf();if(cb)cb()}
 function toggleDet(){var on=document.getElementById("detMode").checked;document.getElementById("qMode").classList.toggle("hidden",on);document.getElementById("dMode").classList.toggle("hidden",!on);if(!on){curItems=[];editIIdx=null;renderIList();updTot()}}
 function prevI(){var n=document.getElementById("iName").value.trim(),q=parseFloat(document.getElementById("iQty").value)||0,u=document.getElementById("iUnit").value,p=parseFloat(document.getElementById("iPrice").value)||0,el=document.getElementById("iPrev");el.textContent=(n&&q>0&&p>0)?"→ "+n+": "+q+" "+u+" × "+p.toFixed(2)+"€ = "+(q*p).toFixed(2)+"€":""}
 function addItem(){
@@ -546,8 +546,20 @@ function importXLS(ev){
         return{id:uid(),pid:selP,date:dateStr,super:sk,notes:String(row["Notas"]||""),items:[],quick:parseFloat(String(row["Total (€)"]||0).replace(",","."))||0,method:"import",createdAt:new Date().toISOString()}
       }).filter(function(t){return t.date&&tTotal(t)>0});
       if(!imp.length){alert("No se encontraron filas válidas. Asegúrate de que el archivo fue exportado con esta app o tiene las columnas: Fecha, Supermercado, Total (€)");return}
-      trips=imp.concat(trips).sort(function(a,b){return new Date(b.date)-new Date(a.date)});
-      saveT();refresh();alert(imp.length+" compras importadas ✅")
+      // Deduplicate: skip rows already in trips (same profile + date + super + total)
+      var existing=trips.filter(function(t){return t.pid===selP});
+      var fresh=imp.filter(function(ni){
+        return !existing.some(function(ex){
+          return ex.date===ni.date&&ex.super===ni.super&&Math.abs(tTotal(ex)-tTotal(ni))<0.01
+        })
+      });
+      var dupes=imp.length-fresh.length;
+      if(!fresh.length){alert("Todas las filas del archivo ya estaban importadas ("+dupes+" duplicadas omitidas).");return}
+      trips=fresh.concat(trips).sort(function(a,b){return new Date(b.date)-new Date(a.date)});
+      saveT();refresh();
+      var msg=fresh.length+" compras importadas ✅";
+      if(dupes>0)msg+="\n("+dupes+" duplicadas omitidas)";
+      alert(msg)
     }catch(err){console.error(err);alert("Error al leer el archivo Excel. Asegúrate de que es un .xlsx exportado desde esta app.")}
   };
   r.onerror=function(){alert("No se pudo leer el archivo.")};
