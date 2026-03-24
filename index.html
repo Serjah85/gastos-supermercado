@@ -643,47 +643,63 @@ async function runOCR(file){
   }
 }
 function parseRec(raw){
-  // Normalize text
-  var t=raw
-    .replace(/\r/g,"\n")
-    .replace(/,(?=\d)/g,".")   // comma decimal → dot
-    .replace(/€/g," EUR")
-    .replace(/[º°]/g,".");
-  // Date extraction
+  // ── Normalize ──────────────────────────────────────────────────────────────
+  // Keep original for supermarket/date detection, work on normalized copy
+  var t=raw.replace(/\r/g,"\n").replace(/€/g," EUR").replace(/[º°]/g,".");
+  // ── Date ───────────────────────────────────────────────────────────────────
   var date=null;
   var mD=t.match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})\b/);
   if(mD){var yy=mD[3].length===2?"20"+mD[3]:mD[3];date=yy+"-"+mD[2].padStart(2,"0")+"-"+mD[1].padStart(2,"0")}
-  // Supermarket detection
+  // ── Supermarket ────────────────────────────────────────────────────────────
   var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
-  // Total extraction (try multiple patterns)
+  // ── Total ──────────────────────────────────────────────────────────────────
   var total=null;
-  var totPats=[
-    /TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR|€)?/i,
-    /IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,
-    /A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,
-    /TOTAL\s*(\d+[.,]\d{2})/i
-  ];
-  totPats.forEach(function(pat){if(!total){var m=t.match(pat);if(m)total=parseFloat(m[1].replace(",","."))}});
-  // Item extraction — try multiple patterns in order of strictness
-  var items=[],seen={};
-  var skipPat=/TOTAL|IMPORTE|PAGAR|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL|WWW|HTTP/i;
-  t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>2&&!skipPat.test(l)}).forEach(function(line){
-    var name=null,price=null;
-    // Pattern 1: name<2+spaces>price (classic ticket format)
-    var m1=/^(.{2,}?)\s{2,}(\d+[.,]\d{2})\s*(?:EUR|€|A)?$/.exec(line);
-    // Pattern 2: name<tab>price
-    var m2=/^(.{2,}?)\t(\d+[.,]\d{2})$/.exec(line);
-    // Pattern 3: name followed by price at end with single space
-    var m3=/^(.{3,}?)\s+(\d+[.,]\d{2})\s*(?:EUR|€)?$/.exec(line);
+  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
+  // ── Items: two-pass line parsing ───────────────────────────────────────────
+  // Pass 1: normalize each line's decimals individually to avoid false matches
+  var skipPat=/TOTAL|IMPORTE|PAGAR|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]/i;
+  var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
+  var items=[];
+  lines.forEach(function(line){
+    if(skipPat.test(line))return;
+    // ── A) Quantity×price annotation line ("4 x 0,50", "2×1.25", "3 Ud x 0.99") ──
+    // These appear AFTER the item line and describe qty and unit price
+    var qm=/^(\d+(?:[.,]\d+)?)\s*(?:ud\.?|uds?\.?|kg|gr?|ml|cl|l\.?)?\s*[xX×]\s*(\d+[.,]\d{2,3})\s*(?:EUR|€)?$/i.exec(line);
+    if(qm&&items.length>0){
+      var qty=parseFloat(qm[1].replace(",","."));
+      var ppu=parseFloat(qm[2].replace(",","."));
+      if(qty>0&&qty<=999&&ppu>0){
+        var last=items[items.length-1];
+        last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))
+      }
+      return
+    }
+    // ── B) Line starting with quantity ("4 BATIDO CHOCOLATE  2,00") ──────────
+    var qfm=/^(\d+)\s+(.{3,}?)\s{2,}(\d+[.,]\d{2})\s*(?:EUR|€|A)?$/.exec(line);
+    if(qfm){
+      var qty2=parseInt(qfm[1],10),name2=qfm[2].trim().replace(/\s+/g," "),tot2=parseFloat(qfm[3].replace(",","."));
+      if(qty2>0&&qty2<=99&&name2.length>1&&tot2>0&&tot2<=500){
+        items.push({name:name2,qty:qty2,ppu:parseFloat((tot2/qty2).toFixed(3)),tot:tot2});return
+      }
+    }
+    // ── C) Classic: name<2+spaces or tab>price ───────────────────────────────
+    var lnorm=line.replace(/,(?=\d)/g,".");
+    var m1=/^(.{2,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|€|[AB*])?$/.exec(lnorm);
+    var m2=/^(.{2,}?)\t(\d+\.\d{2})$/.exec(lnorm);
+    // ── D) Fallback: name + price at end (single space) ──────────────────────
+    var m3=/^(.{4,}?)\s+(\d+\.\d{2})\s*(?:EUR|€)?$/.exec(lnorm);
     var m=m1||m2||m3;
-    if(m){name=m[1].trim().replace(/\s+/g," ");price=parseFloat(m[2].replace(",","."))}
-    if(!name||name.length<2||!price||price<=0||price>500)return;
-    // Deduplicate by normalized name
-    var key=norm(name)+"|"+price;
-    if(seen[key])return;
-    seen[key]=true;
-    items.push({name:name,price:price})
+    if(!m)return;
+    var name=m[1].trim().replace(/\s+/g," ").replace(/[*+ABab]\s*$/,"").trim();
+    var price=parseFloat(m[2]);
+    if(!name||name.length<2||price<=0||price>500)return;
+    // Reject lines that are just a number (OCR artifact)
+    if(/^\d+([.,]\d+)?$/.test(name))return;
+    items.push({name:name,qty:1,ppu:price,tot:price})
   });
+  // ── Deduplicate by normalized name ─────────────────────────────────────────
+  var seen={};
+  items=items.filter(function(it){var k=norm(it.name);if(seen[k])return false;seen[k]=true;return true});
   return{date:date,super:sup,total:total,items:items}
 }
 function applyOCR(p){
@@ -693,12 +709,12 @@ function applyOCR(p){
     document.getElementById("detMode").checked=true;
     document.getElementById("qMode").classList.add("hidden");
     document.getElementById("dMode").classList.remove("hidden");
-    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:1,unit:"ud",ppu:it.price,tot:it.price}});
+    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:it.qty||1,unit:"ud",ppu:it.ppu||0,tot:it.tot||0}});
     renderIList();updTot();
     var pre=document.getElementById("ocrPre");
     pre.classList.remove("hidden");
     pre.innerHTML="<strong>Detectados ("+p.items.length+"):</strong><br>"+
-      p.items.map(function(it){return'<div class="ocr-line"><span>'+esc(it.name)+'</span><span>'+it.price.toFixed(2)+" €</span></div>"}).join("")+
+      p.items.map(function(it){var qLabel=(it.qty&&it.qty>1)?' <span style="color:#27ae60;font-size:11px">×'+it.qty+' ud.</span>':"";return'<div class="ocr-line"><span>'+esc(it.name)+qLabel+'</span><span>'+(it.tot||0).toFixed(2)+" €</span></div>"}).join("")+
       (p.total?'<div class="ocr-line"><span>TOTAL</span><span>'+p.total.toFixed(2)+" €</span></div>":"")
   } else if(p.total){
     document.getElementById("detMode").checked=false;
