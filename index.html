@@ -750,11 +750,23 @@ function applyOCR(p){
     document.getElementById("dMode").classList.remove("hidden");
     curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:it.qty||1,unit:normUnit(it.unit),ppu:it.ppu||0,tot:it.tot||0}});
     renderIList();updTot();
+    // Auto-fill override total when ticket total ≠ sum of items (promotions/discounts)
+    if(p.total){
+      var calcSum=curItems.reduce(function(s,i){return s+Number(i.tot||0)},0);
+      document.getElementById("ovWrap").classList.remove("hidden");
+      if(Math.abs(calcSum-p.total)>0.005){
+        document.getElementById("tOv").value=p.total.toFixed(2)
+      } else {
+        document.getElementById("tOv").value=""
+      }
+    }
     var pre=document.getElementById("ocrPre");
     pre.classList.remove("hidden");
+    var _calcSum2=curItems.reduce(function(s,i){return s+Number(i.tot||0)},0);
+    var _discNote=(p.total&&Math.abs(_calcSum2-p.total)>0.005)?'<div style="background:#fff3e0;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#e65100">⚠️ Descuento detectado (−'+Math.abs(_calcSum2-p.total).toFixed(2)+'€). El total real ya está en el campo de abajo.</div>':'';
     pre.innerHTML="<strong>Detectados ("+p.items.length+"):</strong><br>"+
       p.items.map(function(it){var q=it.qty||1,u=it.unit||"ud",qLabel=(q!==1)?' <span style="color:#27ae60;font-size:11px">'+q+' '+u+'</span>':"";return'<div class="ocr-line"><span>'+esc(it.name)+qLabel+'</span><span>'+(it.tot||0).toFixed(2)+" €</span></div>"}).join("")+
-      (p.total?'<div class="ocr-line"><span>TOTAL</span><span>'+p.total.toFixed(2)+" €</span></div>":"")
+      (p.total?'<div class="ocr-line"><span>TOTAL ticket</span><span>'+p.total.toFixed(2)+" €</span></div>":"")+_discNote
   } else if(p.total){
     document.getElementById("detMode").checked=false;
     document.getElementById("qMode").classList.remove("hidden");
