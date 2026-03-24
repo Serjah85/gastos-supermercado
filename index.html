@@ -644,8 +644,7 @@ async function runOCR(file){
 }
 function parseRec(raw){
   // ── Normalize ──────────────────────────────────────────────────────────────
-  // Keep original for supermarket/date detection, work on normalized copy
-  var t=raw.replace(/\r/g,"\n").replace(/€/g," EUR").replace(/[º°]/g,".");
+  var t=raw.replace(/\r/g,"\n").replace(/\u20ac/g," EUR").replace(/[º°]/g,".");
   // ── Date ───────────────────────────────────────────────────────────────────
   var date=null;
   var mD=t.match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})\b/);
@@ -654,53 +653,78 @@ function parseRec(raw){
   var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
   // ── Total ──────────────────────────────────────────────────────────────────
   var total=null;
-  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
-  // ── Items: two-pass line parsing ───────────────────────────────────────────
-  // Pass 1: normalize each line's decimals individually to avoid false matches
-  var skipPat=/TOTAL|IMPORTE|PAGAR|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]/i;
+  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
+  // ── Item parsing (multi-mode) ──────────────────────────────────────────────
+  // Lines to always skip
+  var skipPat=/TOTAL|IMPORTE|PAGAR|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR/i;
   var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
-  var items=[];
+  var items=[],pendingName=null;
   lines.forEach(function(line){
-    if(skipPat.test(line))return;
-    // ── A) Quantity×price annotation line ("4 x 0,50", "2×1.25", "3 Ud x 0.99") ──
-    // These appear AFTER the item line and describe qty and unit price
-    var qm=/^(\d+(?:[.,]\d+)?)\s*(?:ud\.?|uds?\.?|kg|gr?|ml|cl|l\.?)?\s*[xX×]\s*(\d+[.,]\d{2,3})\s*(?:EUR|€)?$/i.exec(line);
+    if(skipPat.test(line)){pendingName=null;return}
+    // Skip IVA type lines: "A 4% ..." or "B 10% ..."
+    if(/^[A-Z]\s+\d+%/i.test(line)){pendingName=null;return}
+    // Skip discount/return lines (negative amount)
+    if(/\s-\d+[.,]\d+/.test(line)){pendingName=null;return}
+    // Normalize commas used as decimal separators within this line
+    var lnorm=line.replace(/(\d),(\d)/g,"$1.$2");
+    // ── A) Qty×ppu annotation line: "4 x 0,50" / "2×1.25" ─────────────────
+    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?\.?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*(\d+\.\d{2,3})\s*(?:EUR)?$/i.exec(lnorm);
     if(qm&&items.length>0){
-      var qty=parseFloat(qm[1].replace(",","."));
-      var ppu=parseFloat(qm[2].replace(",","."));
-      if(qty>0&&qty<=999&&ppu>0){
-        var last=items[items.length-1];
-        last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))
+      var qty=parseFloat(qm[1]),ppu=parseFloat(qm[2]);
+      if(qty>0&&qty<=999&&ppu>0){var last=items[items.length-1];last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))}
+      pendingName=null;return
+    }
+    // ── E) DIA/tabular format: NAME qty UNIT ppu [garbledTotal] [A|B] ───────
+    // e.g. "PAVO AJILLO 0.606 kg 7.490 EUR 454 EUR B"
+    // e.g. "PERA CONFERENCIA 1ud 1.29 EUR 129 EUR A"
+    // e.g. "BANANA 0.360 kg 1.59 EUR 057 EUR A"
+    var diaM=/^(.+?)\s+(\d+\.?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+\.\d+)\s*(?:EUR)?\s+[\d.]+\s*(?:EUR)?\s*[ABab]?\s*$/i.exec(lnorm);
+    if(diaM){
+      var nDia=diaM[1].trim().replace(/\s+/g," ");
+      if(pendingName){nDia=pendingName+" "+nDia;pendingName=null}
+      var qDia=parseFloat(diaM[2]),uRaw=diaM[3].toLowerCase().replace(/\.$/,"");
+      var uDia=(uRaw==="ud"||uRaw==="uds")?"ud":uRaw;
+      var ppuDia=parseFloat(diaM[4]),totDia=parseFloat((qDia*ppuDia).toFixed(2));
+      if(nDia.length>1&&qDia>0&&ppuDia>0&&totDia>0&&totDia<=500){
+        items.push({name:nDia,qty:qDia,unit:uDia,ppu:ppuDia,tot:totDia})
       }
       return
     }
-    // ── B) Line starting with quantity ("4 BATIDO CHOCOLATE  2,00") ──────────
-    var qfm=/^(\d+)\s+(.{3,}?)\s{2,}(\d+[.,]\d{2})\s*(?:EUR|€|A)?$/.exec(line);
+    // ── B) Qty at start: "4 PRODUCT NAME  total" ────────────────────────────
+    var qfm=/^(\d+)\s+(.{3,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
     if(qfm){
-      var qty2=parseInt(qfm[1],10),name2=qfm[2].trim().replace(/\s+/g," "),tot2=parseFloat(qfm[3].replace(",","."));
-      if(qty2>0&&qty2<=99&&name2.length>1&&tot2>0&&tot2<=500){
-        items.push({name:name2,qty:qty2,ppu:parseFloat((tot2/qty2).toFixed(3)),tot:tot2});return
+      var q3=parseInt(qfm[1],10),n3=qfm[2].trim().replace(/\s+/g," "),t3=parseFloat(qfm[3]);
+      if(pendingName){n3=pendingName+" "+n3;pendingName=null}
+      if(q3>0&&q3<=99&&n3.length>1&&t3>0&&t3<=500){
+        items.push({name:n3,qty:q3,unit:"ud",ppu:parseFloat((t3/q3).toFixed(3)),tot:t3});return
       }
     }
-    // ── C) Classic: name<2+spaces or tab>price ───────────────────────────────
-    var lnorm=line.replace(/,(?=\d)/g,".");
-    var m1=/^(.{2,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|€|[AB*])?$/.exec(lnorm);
+    // ── C) Classic: name + 2+ spaces + price / tab + price ──────────────────
+    var m1=/^(.{2,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
     var m2=/^(.{2,}?)\t(\d+\.\d{2})$/.exec(lnorm);
-    // ── D) Fallback: name + price at end (single space) ──────────────────────
-    var m3=/^(.{4,}?)\s+(\d+\.\d{2})\s*(?:EUR|€)?$/.exec(lnorm);
+    // ── D) Fallback: name + single space + price ─────────────────────────────
+    var m3=/^(.{4,}?)\s+(\d+\.\d{2})\s*(?:EUR)?$/.exec(lnorm);
     var m=m1||m2||m3;
-    if(!m)return;
-    var name=m[1].trim().replace(/\s+/g," ").replace(/[*+ABab]\s*$/,"").trim();
-    var price=parseFloat(m[2]);
-    if(!name||name.length<2||price<=0||price>500)return;
-    // Reject lines that are just a number (OCR artifact)
-    if(/^\d+([.,]\d+)?$/.test(name))return;
-    items.push({name:name,qty:1,ppu:price,tot:price})
+    if(m){
+      var nm=m[1].trim().replace(/\s+/g," ").replace(/[*+ABab]\s*$/,"").trim();
+      if(pendingName){nm=pendingName+" "+nm;pendingName=null}
+      var pr=parseFloat(m[2]);
+      if(!nm||nm.length<2||pr<=0||pr>500||/^\d+(\.\d+)?$/.test(nm))return;
+      items.push({name:nm,qty:1,unit:"ud",ppu:pr,tot:pr});return
+    }
+    // ── Pending: line with no price = possible first part of a split name ────
+    if(/^[A-Z\xc1\xc9\xcd\xd3\xda\xdc\xd1][A-Z\xc1\xc9\xcd\xd3\xda\xdc\xd1\s\d]{1,40}$/.test(line)&&!pendingName){
+      pendingName=line.trim()
+    } else {pendingName=null}
   });
   // ── Deduplicate by normalized name ─────────────────────────────────────────
   var seen={};
   items=items.filter(function(it){var k=norm(it.name);if(seen[k])return false;seen[k]=true;return true});
   return{date:date,super:sup,total:total,items:items}
+}
+function normUnit(u){
+  var map={kg:"kg",kilo:"kg",kilos:"kg",g:"g",gr:"g",gramo:"g",gramos:"g",l:"L",ltr:"L",litro:"L",litros:"L",cl:"L",ml:"ml",ud:"ud",uds:"ud",u:"ud",unidad:"ud",unidades:"ud",pack:"pack",bote:"bote"};
+  return map[(u||"").toLowerCase().replace(/\.$/,"")]||"ud"
 }
 function applyOCR(p){
   if(p.date)document.getElementById("tDate").value=p.date;
@@ -709,12 +733,12 @@ function applyOCR(p){
     document.getElementById("detMode").checked=true;
     document.getElementById("qMode").classList.add("hidden");
     document.getElementById("dMode").classList.remove("hidden");
-    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:it.qty||1,unit:"ud",ppu:it.ppu||0,tot:it.tot||0}});
+    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:it.qty||1,unit:normUnit(it.unit),ppu:it.ppu||0,tot:it.tot||0}});
     renderIList();updTot();
     var pre=document.getElementById("ocrPre");
     pre.classList.remove("hidden");
     pre.innerHTML="<strong>Detectados ("+p.items.length+"):</strong><br>"+
-      p.items.map(function(it){var qLabel=(it.qty&&it.qty>1)?' <span style="color:#27ae60;font-size:11px">×'+it.qty+' ud.</span>':"";return'<div class="ocr-line"><span>'+esc(it.name)+qLabel+'</span><span>'+(it.tot||0).toFixed(2)+" €</span></div>"}).join("")+
+      p.items.map(function(it){var q=it.qty||1,u=it.unit||"ud",qLabel=(q!==1)?' <span style="color:#27ae60;font-size:11px">'+q+' '+u+'</span>':"";return'<div class="ocr-line"><span>'+esc(it.name)+qLabel+'</span><span>'+(it.tot||0).toFixed(2)+" €</span></div>"}).join("")+
       (p.total?'<div class="ocr-line"><span>TOTAL</span><span>'+p.total.toFixed(2)+" €</span></div>":"")
   } else if(p.total){
     document.getElementById("detMode").checked=false;
