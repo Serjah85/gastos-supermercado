@@ -653,41 +653,53 @@ function parseRec(raw){
   var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
   // ── Total ──────────────────────────────────────────────────────────────────
   var total=null;
-  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
-  // ── Item parsing (multi-mode) ──────────────────────────────────────────────
-  // Lines to always skip
-  var skipPat=/TOTAL|IMPORTE|PAGAR|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR/i;
+  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/Total\s+(?:a\s+)?pagar[\s.]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
+  // ── Item parsing ──────────────────────────────────────────────────────────
+  var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|CUPONES|SIN.PROMOCI)/i;
+  // Regex for DIA data segment: qty unit ppu [garbledTotal] [A|B]
+  // garbledTotal is OPTIONAL (OCR sometimes drops it or garbles it beyond recognition)
+  var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
+  // Regex for full DIA line: name qty unit ppu [garbledTotal] [A|B]
+  var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
   var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
   var items=[],pendingName=null;
+  function pushItem(name,qty,unit,ppu){
+    var uNorm={kg:"kg",kilo:"kg",kilos:"kg",g:"g",gr:"g",l:"L",ltr:"L",cl:"L",ml:"ml",ud:"ud",uds:"ud",u:"ud"};
+    var u=(uNorm[unit.toLowerCase().replace(/\.$/,"")])||unit;
+    var tot=parseFloat((qty*ppu).toFixed(2));
+    if(name&&name.length>1&&qty>0&&ppu>0&&tot>0&&tot<=500)items.push({name:name,qty:qty,unit:u,ppu:ppu,tot:tot})
+  }
   lines.forEach(function(line){
     if(skipPat.test(line)){pendingName=null;return}
-    // Skip IVA type lines: "A 4% ..." or "B 10% ..."
+    // Skip IVA type lines: "A 4% ..." "B 10% ..."
     if(/^[A-Z]\s+\d+%/i.test(line)){pendingName=null;return}
-    // Skip discount/return lines (negative amount)
-    if(/\s-\d+[.,]\d+/.test(line)){pendingName=null;return}
-    // Normalize commas used as decimal separators within this line
+    // Skip discount/promo lines (contain a negative amount)
+    if(/-\d+[.,]\d+/.test(line)){pendingName=null;return}
+    // Normalize decimal commas in this line
     var lnorm=line.replace(/(\d),(\d)/g,"$1.$2");
-    // ── A) Qty×ppu annotation line: "4 x 0,50" / "2×1.25" ─────────────────
-    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?\.?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*(\d+\.\d{2,3})\s*(?:EUR)?$/i.exec(lnorm);
+    // ── A) Qty×ppu annotation: "4 x 0.50" ───────────────────────────────────
+    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*(\d+\.\d{2,3})\s*(?:EUR)?$/i.exec(lnorm);
     if(qm&&items.length>0){
       var qty=parseFloat(qm[1]),ppu=parseFloat(qm[2]);
       if(qty>0&&qty<=999&&ppu>0){var last=items[items.length-1];last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))}
       pendingName=null;return
     }
-    // ── E) DIA/tabular format: NAME qty UNIT ppu [garbledTotal] [A|B] ───────
+    // ── F) DIA data-only line: qty unit ppu (name is in pendingName) ─────────
+    // e.g. "0.360 kg 1.59 EUR 057 EUR A" when "BANANA" was on previous line
+    var fdm=rDiaData.exec(lnorm);
+    if(fdm&&pendingName){
+      var qty2=parseFloat(fdm[1]),ppu2=parseFloat(fdm[3]);
+      pushItem(pendingName,qty2,fdm[2],ppu2);
+      pendingName=null;return
+    }
+    // ── E) DIA full line: name qty unit ppu [garbledTotal] [A|B] ────────────
     // e.g. "PAVO AJILLO 0.606 kg 7.490 EUR 454 EUR B"
     // e.g. "PERA CONFERENCIA 1ud 1.29 EUR 129 EUR A"
-    // e.g. "BANANA 0.360 kg 1.59 EUR 057 EUR A"
-    var diaM=/^(.+?)\s+(\d+\.?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+\.\d+)\s*(?:EUR)?\s+[\d.]+\s*(?:EUR)?\s*[ABab]?\s*$/i.exec(lnorm);
+    var diaM=rDiaFull.exec(lnorm);
     if(diaM){
       var nDia=diaM[1].trim().replace(/\s+/g," ");
       if(pendingName){nDia=pendingName+" "+nDia;pendingName=null}
-      var qDia=parseFloat(diaM[2]),uRaw=diaM[3].toLowerCase().replace(/\.$/,"");
-      var uDia=(uRaw==="ud"||uRaw==="uds")?"ud":uRaw;
-      var ppuDia=parseFloat(diaM[4]),totDia=parseFloat((qDia*ppuDia).toFixed(2));
-      if(nDia.length>1&&qDia>0&&ppuDia>0&&totDia>0&&totDia<=500){
-        items.push({name:nDia,qty:qDia,unit:uDia,ppu:ppuDia,tot:totDia})
-      }
+      pushItem(nDia,parseFloat(diaM[2]),diaM[3],parseFloat(diaM[4]));
       return
     }
     // ── B) Qty at start: "4 PRODUCT NAME  total" ────────────────────────────
@@ -699,7 +711,7 @@ function parseRec(raw){
         items.push({name:n3,qty:q3,unit:"ud",ppu:parseFloat((t3/q3).toFixed(3)),tot:t3});return
       }
     }
-    // ── C) Classic: name + 2+ spaces + price / tab + price ──────────────────
+    // ── C) Classic: name + 2+ spaces + price ────────────────────────────────
     var m1=/^(.{2,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
     var m2=/^(.{2,}?)\t(\d+\.\d{2})$/.exec(lnorm);
     // ── D) Fallback: name + single space + price ─────────────────────────────
@@ -712,10 +724,13 @@ function parseRec(raw){
       if(!nm||nm.length<2||pr<=0||pr>500||/^\d+(\.\d+)?$/.test(nm))return;
       items.push({name:nm,qty:1,unit:"ud",ppu:pr,tot:pr});return
     }
-    // ── Pending: line with no price = possible first part of a split name ────
-    if(/^[A-Z\xc1\xc9\xcd\xd3\xda\xdc\xd1][A-Z\xc1\xc9\xcd\xd3\xda\xdc\xd1\s\d]{1,40}$/.test(line)&&!pendingName){
+    // ── Pending: line with no price = possible first part of split name ───────
+    // Accept all-caps words (DIA style) or mixed case with reasonable length
+    if(line.length>=2&&line.length<=50&&!/\d{3,}/.test(line)&&/[A-Za-z]/.test(line)&&!pendingName){
       pendingName=line.trim()
-    } else {pendingName=null}
+    } else if(pendingName){
+      pendingName=null  // two consecutive no-price lines → reset
+    }
   });
   // ── Deduplicate by normalized name ─────────────────────────────────────────
   var seen={};
