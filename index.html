@@ -716,19 +716,39 @@ async function runOCR(file){
 }
 function parseRec(raw){
   var t=raw.replace(/\r/g,"\n").replace(/\u20ac/g," EUR").replace(/[\u00BA\u00B0]/g,".").replace(/\u00a0/g," ").replace(/[\u2013\u2014\u2212]/g,"-");
+  function normalizeOCRLine(line){
+    return line
+      .split(/\s{2,}/)
+      .map(function(seg){
+        return seg
+          .replace(/\b(?:[A-Za-z0-9]\s+){2,}[A-Za-z0-9]\b/g,function(m){return m.replace(/\s+/g,"")})
+          .replace(/\b(\d(?:\s+\d)+)(?=\s*[.,]\s*\d)/g,function(m){return m.replace(/\s+/g,"")})
+          .replace(/(\d)\s*([.,])\s*((?:\d\s*){1,4})/g,function(_,a,sep,b){return a+sep+b.replace(/\s+/g,"")});
+      })
+      .join(" ")
+      .replace(/\s+/g," ")
+      .trim()
+  }
+  var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
+  var normLines=lines.map(normalizeOCRLine);
+  var normText=normLines.join("\n");
   var date=null;
   var mD=t.match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})\b/);
   if(mD){var yy=mD[3].length===2?"20"+mD[3]:mD[3];date=yy+"-"+mD[2].padStart(2,"0")+"-"+mD[1].padStart(2,"0")}
   var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
   var total=null;
-  [/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})/i,/Total\s+(?:a\s+)?pagar[\s.]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/TOTAL\s*(\d+[.,]\d{2})/i].forEach(function(p){if(!total){var m=t.match(p);if(m)total=parseFloat(m[1].replace(",","."))}});
+  [/TOTAL\s+A\s+PAGAR\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/Total\s+(?:a\s+)?pagar[\s.]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i].forEach(function(p){
+    if(!total){
+      var m=normText.match(p)||t.match(p);
+      if(m)total=parseFloat(m[1].replace(",","."))
+    }
+  });
   var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|SIN.PROMOCI)/i;
   var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
   var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s+[\d.,]+\s*(?:EUR)?\s*[ABab]?\s*$/i;
   var rQtyPpuTotal=/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
   var rQtyPpuTotalNoName=/^(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
-  var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
-  var items=[],pendingName=null,discounts=[];
+  var items=[],pendingName=null,discounts=[],carrefourItemsClosed=false;
   function num(v){return parseFloat(String(v||"").replace(",","."))}
   function cleanName(name){return (name||"").replace(/\s+/g," ").replace(/[*+ABab]\s*$/,"").trim()}
   function pushItem(name,qty,unit,ppu,tot){
@@ -743,16 +763,23 @@ function parseRec(raw){
     var clean=cleanName(label);
     if(clean&&amount>0&&amount<=500)discounts.push({name:clean,amount:amount})
   }
-  lines.forEach(function(line){
-    if(skipPat.test(line)){pendingName=null;return}
-    if(/^[A-Z]\s+\d+%/i.test(line)){pendingName=null;return}
-    var lnorm=line.replace(/(\d),(\d)/g,"$1.$2").replace(/\s+/g," ").trim();
-    if(/(?:descuento|dto\.?|promo|promoci|ahorro|cup|vale)/i.test(lnorm)&&/-?\d+[.,]\d{2}/.test(lnorm)){
+  normLines.forEach(function(lnorm){
+    if(skipPat.test(lnorm)){pendingName=null;return}
+    if(/^[A-Z]\s+\d+%/i.test(lnorm)){pendingName=null;return}
+    if(sup==="carrefour"&&/^(?:SUBTOTAL|20\s+ART\.\s+TOTAL\s+A\s+PAGAR|PAGADO\b|VENTAJAS\s+OBTENIDAS|TIPO\s+BASE\s+CUOTA|TARJETA\b|N\.AUTO|N\.OPER|COD\.RESPUESTA|MONEDA|VALIDACION|CHEQUE\s+CLUB\s+REDIMIDO|SOCIO\s+CLUB\s+CARREFOUR|SALDO\s+ACUMULADO|LE\s+ATENDIO)/i.test(lnorm)){
+      carrefourItemsClosed=true
+    }
+    if(!carrefourItemsClosed&&/(?:descuento|dto\.?|promo|promoci|ahorro|cup|vale)/i.test(lnorm)&&/-?\d+[.,]\d{2}/.test(lnorm)){
       var dm=lnorm.match(/(.+?)\s*(-?\d+[.,]\d{2})\s*(?:EUR)?\s*$/i);
       if(dm){pushDiscount(dm[1],dm[2]);pendingName=null;return}
     }
+    if(carrefourItemsClosed){pendingName=null;return}
     if(/-\d+[.,]\d+/.test(lnorm)){pendingName=null;return}
-    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*\(?\s*(\d+[.,]\d{2,3})\s*\)?\s*(?:[\d.,]+)?\s*(?:EUR)?$/i.exec(lnorm);
+    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*\(?\s*(\d+[.,]\d{2,3})\s*\)?\s*(\d+[.,]\d{2})?\s*(?:EUR)?$/i.exec(lnorm);
+    if(qm&&pendingName){
+      pushItem(pendingName,num(qm[1]),"ud",num(qm[2]),qm[3]?num(qm[3]):null);
+      pendingName=null;return
+    }
     if(qm&&items.length>0){
       var qty=num(qm[1]),ppu=num(qm[2]);
       if(qty>0&&qty<=999&&ppu>0){var last=items[items.length-1];last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))}
@@ -782,7 +809,7 @@ function parseRec(raw){
       pushItem(nDia,num(diaM[2]),diaM[3],num(diaM[4]));
       return
     }
-    var qfm=/^(\d+)\s+(.{3,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
+    var qfm=/^(\d+)\s+(.{3,}?)\s{2,}(\d+[.,]\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
     if(qfm){
       var q3=parseInt(qfm[1],10),n3=qfm[2].trim().replace(/\s+/g," "),t3=num(qfm[3]);
       if(pendingName){n3=pendingName+" "+n3;pendingName=null}
@@ -790,9 +817,9 @@ function parseRec(raw){
         items.push({name:n3,qty:q3,unit:"ud",ppu:parseFloat((t3/q3).toFixed(3)),tot:t3});return
       }
     }
-    var m1=/^(.{2,}?)\s{2,}(\d+\.\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
-    var m2=/^(.{2,}?)\t(\d+\.\d{2})$/.exec(lnorm);
-    var m3=/^(.{4,}?)\s+(\d+\.\d{2})\s*(?:EUR)?$/.exec(lnorm);
+    var m1=/^(.{2,}?)\s{2,}(\d+[.,]\d{2})\s*(?:EUR|[ABab*])?$/.exec(lnorm);
+    var m2=/^(.{2,}?)\t(\d+[.,]\d{2})$/.exec(lnorm);
+    var m3=/^(.{4,}?)\s+(\d+[.,]\d{2})\s*(?:EUR)?$/.exec(lnorm);
     var m=m1||m2||m3;
     if(m){
       var nm=cleanName(m[1]);
@@ -801,8 +828,8 @@ function parseRec(raw){
       if(!nm||nm.length<2||pr<=0||pr>500||/^\d+(\.\d+)?$/.test(nm))return;
       items.push({name:nm,qty:1,unit:"ud",ppu:pr,tot:pr});return
     }
-    if(/^[A-Za-z][A-Za-z\s\d.'\/-]{1,59}$/.test(line)&&!/\d+[.,]\d{2}/.test(line)){
-      pendingName=pendingName?cleanName(pendingName+" "+line):line.trim()
+    if(/^[A-Za-z][A-Za-z\s\d.'\/-]{1,59}$/.test(lnorm)&&!/\d+[.,]\d{2}/.test(lnorm)){
+      pendingName=pendingName?cleanName(pendingName+" "+lnorm):lnorm.trim()
     } else if(pendingName){
       pendingName=null
     }
