@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta name="description" content="Controla tus gastos del supermercado. Compara precios y analiza por categorías.">
   <meta name="theme-color" content="#1a5276">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Gastos Super">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <title>Control de Gastos Supermercado</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
@@ -113,6 +117,7 @@
     .ocr-raw{background:#f0f4f8;border-radius:8px;padding:10px;margin-top:8px;max-height:160px;overflow-y:auto;font-size:11px;font-family:monospace;color:#555;white-space:pre-wrap;line-height:1.4}
     .ibanner{background:linear-gradient(135deg,#27ae60,#219a52);color:#fff;padding:14px 16px;border-radius:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;box-shadow:0 4px 6px rgba(0,0,0,.12)}
     .ibanner.hidden{display:none}
+    .ibanner.info{background:linear-gradient(135deg,#1a5276,#2874a6)}
     .ibtn{background:#fff;color:#27ae60;padding:8px 12px;border-radius:8px;border:none;font-weight:900;cursor:pointer;font-size:13px}
     .footer{background:#fff;padding:18px;border-radius:12px;margin-top:18px;box-shadow:0 4px 6px rgba(0,0,0,.1);text-align:center}
     .footer-text{color:#666;font-size:13px;margin-bottom:12px;line-height:1.6}
@@ -131,6 +136,15 @@
     <div style="flex:1;font-size:14px">📱 <strong>Instala la app</strong> en tu móvil (PWA)</div>
     <button class="ibtn" onclick="installPWA()">Instalar</button>
     <button style="background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px" onclick="document.getElementById('installBanner').classList.add('hidden')">×</button>
+  </div>
+  <div id="iosBanner" class="ibanner info hidden">
+    <div style="flex:1;font-size:14px"><strong>iPhone:</strong> abre la web en Safari y usa Compartir > Anadir a pantalla de inicio.</div>
+    <button style="background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px" onclick="document.getElementById('iosBanner').classList.add('hidden')">x</button>
+  </div>
+  <div id="updateBanner" class="ibanner info hidden">
+    <div style="flex:1;font-size:14px"><strong>Nueva version disponible.</strong> Actualiza para usar la ultima version.</div>
+    <button class="ibtn" onclick="refreshApp()">Actualizar</button>
+    <button style="background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px" onclick="document.getElementById('updateBanner').classList.add('hidden')">x</button>
   </div>
 
   <div class="header">
@@ -895,10 +909,35 @@ function ocrDemo(){
 // ─── PWA ──────────────────────────────────────────────────────────────────────
 var dP=null;
 function installPWA(){if(!dP)return;dP.prompt();dP.userChoice.finally(function(){dP=null;document.getElementById("installBanner").classList.add("hidden")})}
+function refreshApp(){window.location.reload()}
+function isStandalone(){return window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true}
+function isIos(){return /iphone|ipad|ipod/i.test(navigator.userAgent)}
+function isSafari(){return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)}
+function setupInstallHints(){
+  if(isIos()&&isSafari()&&!isStandalone())document.getElementById("iosBanner").classList.remove("hidden")
+}
+function setupServiceWorker(){
+  if(!("serviceWorker" in navigator))return;
+  navigator.serviceWorker.register("./sw.js").then(function(reg){
+    function showUpdate(){document.getElementById("updateBanner").classList.remove("hidden")}
+    if(reg.waiting)showUpdate();
+    reg.addEventListener("updatefound",function(){
+      var nw=reg.installing;
+      if(!nw)return;
+      nw.addEventListener("statechange",function(){
+        if(nw.state==="installed"&&navigator.serviceWorker.controller)showUpdate()
+      })
+    });
+    navigator.serviceWorker.addEventListener("controllerchange",function(){
+      if(window.__reloadingForSW)return;
+      window.__reloadingForSW=true;
+      window.location.reload()
+    })
+  }).catch(function(){})
+}
 window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();dP=e;document.getElementById("installBanner").classList.remove("hidden")});
 window.addEventListener("appinstalled",function(){dP=null;document.getElementById("installBanner").classList.add("hidden")});
-if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(function(){});
-window.addEventListener("DOMContentLoaded",function(){loadAll()});
+window.addEventListener("DOMContentLoaded",function(){setupInstallHints();setupServiceWorker();loadAll()});
 </script>
 </body>
 </html>

@@ -1,10 +1,12 @@
 {
   "name": "Control de Gastos Supermercado",
   "short_name": "Gastos Super",
+  "id": "/",
   "description": "Controla tus gastos del supermercado. Compara precios entre supermercados y analiza tu gasto por categorías.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "prefer_related_applications": false,
   "orientation": "portrait-primary",
   "background_color": "#1a5276",
   "theme_color": "#1a5276",
