@@ -279,11 +279,11 @@
       <div style="margin-top:8px"><span style="font-weight:800;color:#666">Estado:</span> <span id="ocrSt">En espera…</span></div>
       <div class="ocr-prog"><div class="ocr-bar" id="ocrBar"></div></div>
       <div class="ocr-row">
-        <button class="btn blue" onclick="trigOCR()">📤 Seleccionar foto</button>
+        <button class="btn blue" onclick="trigOCR()">📤 Foto o PDF del ticket</button>
         <button class="btn sec" onclick="ocrDemo()">🧪 Demo Mercadona</button>
       </div>
       <div id="ocrTips" style="margin-top:10px;font-size:12px;color:#888;line-height:1.6;display:none">
-        💡 <strong>Consejos para mejor resultado:</strong> foto bien iluminada, ticket plano, sin sombras. El OCR funciona mejor con tickets de texto impreso claro.
+        💡 <strong>Consejos:</strong> puedes subir una <strong>foto</strong> del ticket físico o el <strong>PDF</strong> de la app (DIA, Carrefour…). Los PDFs digitales se leen con mayor precisión.
       </div>
       <div id="ocrPre" class="ocr-pre hidden"></div>
       <div id="ocrRawWrap" style="margin-top:10px;display:none">
@@ -294,7 +294,7 @@
   </div>
 </div>
 
-<input type="file" id="ocrFile" accept="image/*" onchange="handleOCRFile(event)">
+<input type="file" id="ocrFile" accept="image/*,.pdf,application/pdf" onchange="handleOCRFile(event)">
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script>
 var SK={p:"gs_p_v2",t:"gs_t_v2",a:"gs_a_v2",u:"gs_u_v2"};
@@ -579,13 +579,76 @@ function startOCR(){
 function closeOCR(){document.getElementById("ocrModal").classList.remove("open");document.body.classList.remove("modal-open")}
 function setOCR(t,p){document.getElementById("ocrSt").textContent=t;document.getElementById("ocrBar").style.width=Math.max(0,Math.min(100,p||0))+"%"}
 function trigOCR(){document.getElementById("ocrFile").click()}
+var pdfJsOk=false;
+async function loadPdfJs(){
+  if(pdfJsOk)return;
+  await new Promise(function(res,rej){var s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";s.onload=res;s.onerror=function(){rej(new Error("No se pudo cargar PDF.js"))};document.head.appendChild(s)});
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  pdfJsOk=true
+}
+function reconstructLines(items){
+  if(!items.length)return"";
+  var TOL=4,groups=[];
+  items.forEach(function(it){
+    if(!it.str.trim())return;
+    var y=Math.round(it.transform[5]),x=it.transform[4];
+    var g=groups.find(function(g){return Math.abs(g.y-y)<TOL});
+    if(!g){g={y:y,items:[]};groups.push(g)}
+    g.items.push({x:x,text:it.str})
+  });
+  groups.sort(function(a,b){return b.y-a.y});
+  return groups.map(function(g){
+    g.items.sort(function(a,b){return a.x-b.x});
+    var line="",lastX=null,lastLen=0;
+    g.items.forEach(function(it){
+      if(lastX!==null){var gap=it.x-(lastX+lastLen*5.5);line+=gap>15?"  ":" "}
+      line+=it.text;lastX=it.x;lastLen=it.text.length
+    });
+    return line.trim()
+  }).filter(function(l){return l.length>0}).join("\n")
+}
+async function handlePDF(file){
+  document.getElementById("ocrModal").classList.add("open");document.body.classList.add("modal-open");
+  document.getElementById("ocrTips").style.display="none";document.getElementById("ocrRawWrap").style.display="none";
+  setOCR("Cargando lector de PDF…",8);
+  await loadPdfJs();
+  setOCR("Leyendo PDF…",20);
+  var arrayBuf=await file.arrayBuffer();
+  var pdf=await pdfjsLib.getDocument({data:arrayBuf}).promise;
+  var fullText="";
+  for(var pg=1;pg<=pdf.numPages;pg++){
+    var page=await pdf.getPage(pg);
+    var tc=await page.getTextContent();
+    var raw=tc.items.map(function(i){return i.str}).join("").trim();
+    if(raw.length>15){
+      setOCR("Extrayendo texto (pág. "+pg+"/"+pdf.numPages+")…",30+Math.round((pg/pdf.numPages)*40));
+      fullText+=reconstructLines(tc.items)+"\n"
+    } else {
+      // Image-based PDF page — render to canvas then OCR
+      setOCR("PDF de imagen, aplicando OCR (pág. "+pg+")…",30);
+      var vp=page.getViewport({scale:2.0});
+      var cv=document.createElement("canvas");cv.width=vp.width;cv.height=vp.height;
+      await page.render({canvasContext:cv.getContext("2d"),viewport:vp}).promise;
+      var blob=await new Promise(function(res){cv.toBlob(res,"image/png")});
+      await runOCR(blob);return
+    }
+  }
+  setOCR("Analizando…",78);
+  if(fullText.trim()){
+    document.getElementById("ocrRaw").textContent=fullText;document.getElementById("ocrRawWrap").style.display="block";
+    var parsed=parseRec(fullText);applyOCR(parsed);
+    if(parsed.items&&parsed.items.length>0){setOCR("Listo ✅  "+parsed.items.length+" productos del PDF. Revisa categorías.",100)}
+    else if(parsed.total){setOCR("Listo ✅  Total detectado: "+parsed.total.toFixed(2)+"€. Sin líneas de producto.",100)}
+    else{setOCR("⚠️ No se encontraron productos. Revisa el texto bruto.",60);document.getElementById("ocrTips").style.display="block"}
+  } else{setOCR("⚠️ PDF sin contenido legible.",50)}
+}
 function handleOCRFile(ev){
-  var f=ev.target.files[0];
-  ev.target.value="";
-  if(!f)return;
-  runOCR(f).catch(function(e){
-    console.error("OCR error:",e);
-    setOCR("❌ Error leyendo el ticket. Prueba con otra foto.",0);
+  var f=ev.target.files[0];ev.target.value="";if(!f)return;
+  var isPDF=f.type==="application/pdf"||f.name.toLowerCase().endsWith(".pdf");
+  var handler=isPDF?handlePDF(f):runOCR(f);
+  handler.catch(function(e){
+    console.error(isPDF?"PDF":"OCR","error:",e);
+    setOCR("❌ Error: "+e.message,0);
     document.getElementById("ocrTips").style.display="block"
   })
 }
@@ -597,16 +660,25 @@ async function runOCR(file){
   if(!tesOk){
     setOCR("Cargando motor OCR (primera vez tarda ~10s)…",8);
     await new Promise(function(res,rej){
-      var s=document.createElement("script");
-      s.src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js";
-      s.onload=res;
-      s.onerror=function(){rej(new Error("No se pudo cargar Tesseract.js. Comprueba la conexión a Internet."))}
-      document.head.appendChild(s)
+      function tryLoad(urls,i){
+        if(i>=urls.length){rej(new Error("No se pudo cargar Tesseract.js. Comprueba tu conexión a Internet."));return}
+        var s=document.createElement("script");
+        s.src=urls[i];
+        s.onload=res;
+        s.onerror=function(){tryLoad(urls,i+1)};
+        document.head.appendChild(s)
+      }
+      tryLoad([
+        "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+        "https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"
+      ],0)
     });
     tesOk=true
   }
   setOCR("Preparando imagen…",15);
   var worker=await Tesseract.createWorker("spa",1,{
+    workerPath:"https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js",
+    langPath:"https://tessdata.projectnaptha.com/4.0.0",
     logger:function(m){
       if(m.status==="recognizing text")setOCR("Reconociendo texto… "+Math.round((m.progress||0)*100)+"%",15+Math.round((m.progress||0)*70))
     }
@@ -660,7 +732,7 @@ function parseRec(raw){
   // garbledTotal is OPTIONAL (OCR sometimes drops it or garbles it beyond recognition)
   var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
   // Regex for full DIA line: name qty unit ppu [garbledTotal] [A|B]
-  var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
+  var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s+[\d.,]+\s*(?:EUR)?\s*[ABab]?\s*$/i;
   var lines=t.split("\n").map(function(l){return l.trim()}).filter(function(l){return l.length>1});
   var items=[],pendingName=null;
   function pushItem(name,qty,unit,ppu){
@@ -678,7 +750,7 @@ function parseRec(raw){
     // Normalize decimal commas in this line
     var lnorm=line.replace(/(\d),(\d)/g,"$1.$2");
     // ── A) Qty×ppu annotation: "4 x 0.50" ───────────────────────────────────
-    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*(\d+\.\d{2,3})\s*(?:EUR)?$/i.exec(lnorm);
+    var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*\(?\s*(\d+[.,]\d{2,3})\s*\)?\s*(?:[\d.,]+)?\s*(?:EUR)?$/i.exec(lnorm);
     if(qm&&items.length>0){
       var qty=parseFloat(qm[1]),ppu=parseFloat(qm[2]);
       if(qty>0&&qty<=999&&ppu>0){var last=items[items.length-1];last.qty=qty;last.ppu=ppu;last.tot=parseFloat((qty*ppu).toFixed(2))}
@@ -726,7 +798,7 @@ function parseRec(raw){
     }
     // ── Pending: line with no price = possible first part of split name ───────
     // Accept all-caps words (DIA style) or mixed case with reasonable length
-    if(line.length>=2&&line.length<=50&&!/\d{3,}/.test(line)&&/[A-Za-z]/.test(line)&&!pendingName){
+    if(/^[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ\s\d]{1,49}$/.test(line)&&!pendingName){
       pendingName=line.trim()
     } else if(pendingName){
       pendingName=null  // two consecutive no-price lines → reset
