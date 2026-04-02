@@ -757,7 +757,7 @@ function parseRec(raw){
       if(m)total=parseFloat(m[1].replace(",","."))
     }
   });
-  var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|SIN.PROMOCI)/i;
+  var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|^SIN PROMOCI)/i;
   var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
   var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:\s*EUR)?\s+[\d.,]+\s*(?:\s*EUR)?\s*[ABab]?\s*$/i;
   var rQtyPpuTotal=/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
