@@ -730,6 +730,8 @@ async function runOCR(file){
 }
 function parseRec(raw){
   var t=raw.replace(/\r/g,"\n").replace(/\u20ac/g," EUR").replace(/[\u00BA\u00B0]/g,".").replace(/\u00a0/g," ").replace(/[\u2013\u2014\u2212]/g,"-");
+  // Precio unitario con unidad (DIA: "3,29 \u20ac/kg") \u2192 quitar "/kg" para que las regex vean "3,29 EUR"
+  t=t.replace(/EUR\s*\/\s*(?:kg|ud|uds|u|l|lt|litro|unidad)\b\.?/gi,"EUR").replace(/(\d)\s*\/\s*(?:kg|ud|uds|l|lt)\b\.?/gi,"$1");
   function normalizeOCRLine(line){
     return line
       .split(/\s{2,}/)
@@ -737,7 +739,8 @@ function parseRec(raw){
         return seg
           .replace(/\b(?:[A-Za-z0-9]\s+){2,}[A-Za-z0-9]\b/g,function(m){return m.replace(/\s+/g,"")})
           .replace(/\b(\d(?:\s+\d)+)(?=\s*[.,]\s*\d)/g,function(m){return m.replace(/\s+/g,"")})
-          .replace(/(\d)\s*([.,])\s*((?:\d\s*){1,4})/g,function(_,a,sep,b){return a+sep+b.replace(/\s+/g,"")});
+          // Decimales: "3 , 2 9" → "3,29", sin fusionar precios contiguos ("3,29 1,37" se queda igual)
+          .replace(/(\d)\s*([.,])\s*(\d{2,3}(?!\d)|\d(?: \d){1,2}(?!\s*[.,\d]))/g,function(_,a,sep,b){return a+sep+b.replace(/\s+/g,"")});
       })
       .join(" ")
       .replace(/\s+/g," ")
@@ -764,7 +767,8 @@ function parseRec(raw){
   var rQtyPpuTotalNoName=/^(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
   var items=[],pendingName=null,discounts=[],carrefourItemsClosed=false;
   function num(v){return parseFloat(String(v||"").replace(",","."))}
-  function cleanName(name){return (name||"").replace(/\s+/g," ").replace(/[*+ABab]\s*$/,"").trim()}
+  // Quita la letra de IVA solo si va suelta ("... A"), no la última letra de "RAMA"
+  function cleanName(name){return (name||"").replace(/\s+/g," ").trim().replace(/(?:\s+[ABab]|\s*[*+])$/,"").trim()}
   function pushItem(name,qty,unit,ppu,tot){
     var uNorm={kg:"kg",kilo:"kg",kilos:"kg",g:"g",gr:"g",l:"L",ltr:"L",cl:"L",ml:"ml",ud:"ud",uds:"ud",u:"ud"};
     var u=(uNorm[String(unit||"").toLowerCase().replace(/\.$/,"")])||unit;
@@ -779,6 +783,8 @@ function parseRec(raw){
   }
   normLines.forEach(function(lnorm){
     if(skipPat.test(lnorm)){pendingName=null;return}
+    // Cabecera con solo el nombre de la tienda: no debe pegarse al primer producto
+    if(/^(?:DIA|MERCADONA|CARREFOUR(?:\s+EXPRESS|\s+MARKET)?|LIDL|ALDI|AHORRAMAS|EL CORTE INGLES|AMAZON(?:\s+FRESH)?)$/i.test(lnorm)){pendingName=null;return}
     if(/^[A-Z]\s+\d+%/i.test(lnorm)){pendingName=null;return}
     if(sup==="carrefour"&&/^(?:SUBTOTAL|20\s+ART\.\s+TOTAL\s+A\s+PAGAR|PAGADO\b|VENTAJAS\s+OBTENIDAS|TIPO\s+BASE\s+CUOTA|TARJETA\b|N\.AUTO|N\.OPER|COD\.RESPUESTA|MONEDA|VALIDACION|CHEQUE\s+CLUB\s+REDIMIDO|SOCIO\s+CLUB\s+CARREFOUR|SALDO\s+ACUMULADO|LE\s+ATENDIO)/i.test(lnorm)){
       carrefourItemsClosed=true
