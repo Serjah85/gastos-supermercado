@@ -103,13 +103,15 @@ Netlify detecta el commit y actualiza la app. Arancha verá los cambios en su pr
 
 - ✅ Múltiples perfiles de usuario
 - ✅ Registro rápido (solo total) o detallado (producto a producto)
-- ✅ OCR de ticket con cámara del móvil
-- ✅ 11 categorías: Fruta, Verdura, Carne, Pescado, Lácteos, Panadería, Bebidas, Limpieza, Higiene, Congelados, Otros
-- ✅ 9 supermercados: Mercadona, Carrefour, DIA, Ahorramas, Lidl, Aldi, El Corte Inglés, Amazon Fresh, Otro
+- ✅ OCR de ticket: foto, captura o PDF (DIA, Carrefour, Mercadona). Detecta productos, total y promociones
+- ✅ 12 categorías: Fruta, Verdura, Carne, Pescado, Lácteos, Panadería, Bebidas, Limpieza, Higiene, Congelados, Despensa, Otros
+- ✅ Categoría automática: recuerda la que diste antes a cada producto; si no, la deduce por palabras clave o por el tipo de tienda
+- ✅ 28 supermercados (Mercadona, Carrefour, DIA, Lidl, Aldi, Alcampo, Eroski, Consum, Ahorramas, El Corte Inglés, Hipercor, BM, Lupa, Gadis, Froiz, Covirán, Condis, Caprabo, Bonpreu, Spar, Masymas, HiperDino, Supeco, Costco, Makro…)
+- ✅ Comercio de barrio: mercado municipal, carnicería, pollería, charcutería, pescadería, frutería, panadería, droguería y tienda de barrio
 - ✅ Dashboard: gasto semanal, mensual, ticket promedio, total del período
 - ✅ Estadísticas: tendencia mensual, por categoría, por supermercado
 - ✅ Comparador automático de precios entre supermercados
-- ✅ Exportar / importar Excel (3 hojas: Compras, Productos, Alertas)
+- ✅ Exportar Excel (hojas Compras y Productos) e importar Excel (solo totales por compra)
 - ✅ Funciona offline (Service Worker)
 - ✅ Instalable como PWA en móvil y escritorio
 

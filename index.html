@@ -170,7 +170,7 @@
         </select>
       </div>
       <div class="form-group" style="margin-bottom:0">
-        <label>Supermercado</label>
+        <label>Tienda</label>
         <select id="superFilter" onchange="onChangeFilter()">
           <option value="all">Todos</option>
         </select>
@@ -219,7 +219,7 @@
       <form id="tripForm" onsubmit="saveTripForm(event)">
         <div class="form-row">
           <div class="form-group"><label>Fecha</label><input type="date" id="tDate" required></div>
-          <div class="form-group"><label>Supermercado</label><select id="tSuper"></select></div>
+          <div class="form-group"><label>Supermercado / tienda</label><select id="tSuper" onchange="autoCat()"></select></div>
         </div>
         <div class="form-group"><label>Notas (opcional)</label><input type="text" id="tNotes" placeholder="Ej: compra semanal..."></div>
         <div class="toggle-row">
@@ -234,8 +234,8 @@
           <div class="items-section">
             <h3>🧺 Productos</h3>
             <div class="iarow">
-              <div class="form-group" style="margin-bottom:0"><label>Producto</label><input type="text" id="iName" placeholder="Ej: Leche entera 1L" oninput="prevI()"></div>
-              <div class="form-group" style="margin-bottom:0"><label>Categoría</label><select id="iCat"></select></div>
+              <div class="form-group" style="margin-bottom:0"><label>Producto</label><input type="text" id="iName" placeholder="Ej: Leche entera 1L" oninput="prevI();autoCat()"></div>
+              <div class="form-group" style="margin-bottom:0"><label>Categoría</label><select id="iCat" onchange="catTouched=true"></select></div>
               <div class="form-group" style="margin-bottom:0"><label>Cantidad</label><input type="number" step="0.001" id="iQty" value="1" min="0.001" oninput="prevI()"></div>
               <div class="form-group" style="margin-bottom:0"><label>Unidad</label><select id="iUnit"><option value="ud">ud.</option><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option><option value="pack">pack</option><option value="bote">bote</option></select></div>
               <div class="form-group" style="margin-bottom:0"><label>€/ud</label><input type="number" step="0.001" id="iPrice" placeholder="0.00" min="0.001" oninput="prevI()"></div>
@@ -313,9 +313,26 @@
 <script>
 var SK={p:"gs_p_v2",t:"gs_t_v2",a:"gs_a_v2",u:"gs_u_v2"};
 var ALL_ID="__all__";
-var SUPERS={mercadona:{label:"Mercadona",color:"#00833e",emoji:"🛒"},carrefour:{label:"Carrefour",color:"#0057a0",emoji:"🛍️"},dia:{label:"DIA",color:"#e30613",emoji:"🔴"},ahorramas:{label:"Ahorramas",color:"#d4a017",emoji:"🟡"},lidl:{label:"Lidl",color:"#0050aa",emoji:"🔵"},aldi:{label:"Aldi",color:"#1a1a5e",emoji:"⚪"},elcorteingles:{label:"El Corte Inglés",color:"#007140",emoji:"🏬"},amazon:{label:"Amazon Fresh",color:"#ff9900",emoji:"📦"},other:{label:"Otro",color:"#95a5a6",emoji:"🏪"}};
-var CATS={fruta:{label:"Fruta",icon:"🍎",color:"#e74c3c"},verdura:{label:"Verdura",icon:"🥦",color:"#27ae60"},carne:{label:"Carne",icon:"🥩",color:"#c0392b"},pescado:{label:"Pescado",icon:"🐟",color:"#2980b9"},lacteos:{label:"Lácteos",icon:"🥛",color:"#f39c12"},panaderia:{label:"Panadería",icon:"🍞",color:"#e67e22"},bebidas:{label:"Bebidas",icon:"🥤",color:"#9b59b6"},limpieza:{label:"Limpieza",icon:"🧹",color:"#1abc9c"},higiene:{label:"Higiene",icon:"🧴",color:"#3498db"},congelados:{label:"Congelados",icon:"🧊",color:"#00bcd4"},otros:{label:"Otros",icon:"📦",color:"#95a5a6"}};
-var profiles=[],trips=[],alerts=[],selP=null,selPer="month",selSup="all",editTId=null,curItems=[],editIIdx=null,ppMode="new",confCb=null,tesOk=false;
+// g: grupo del desplegable (super | barrio | otro). cat: categoría por defecto de los productos de esa tienda
+var SUPERS={
+  mercadona:{label:"Mercadona",color:"#00833e",emoji:"🛒",g:"super"},carrefour:{label:"Carrefour",color:"#0057a0",emoji:"🛍️",g:"super"},dia:{label:"DIA",color:"#e30613",emoji:"🔴",g:"super"},lidl:{label:"Lidl",color:"#0050aa",emoji:"🔵",g:"super"},aldi:{label:"Aldi",color:"#1a1a5e",emoji:"⚪",g:"super"},
+  alcampo:{label:"Alcampo",color:"#e2001a",emoji:"🛒",g:"super"},eroski:{label:"Eroski",color:"#d6001c",emoji:"🛒",g:"super"},consum:{label:"Consum",color:"#f39200",emoji:"🛒",g:"super"},ahorramas:{label:"Ahorramas",color:"#d4a017",emoji:"🟡",g:"super"},
+  elcorteingles:{label:"El Corte Inglés",color:"#007140",emoji:"🏬",g:"super"},hipercor:{label:"Hipercor",color:"#00813d",emoji:"🏬",g:"super"},supercor:{label:"Supercor",color:"#2e7d32",emoji:"🏬",g:"super"},
+  bm:{label:"BM Supermercados",color:"#c8102e",emoji:"🛒",g:"super"},lupa:{label:"Lupa",color:"#e4032e",emoji:"🛒",g:"super"},gadis:{label:"Gadis",color:"#e30613",emoji:"🛒",g:"super"},froiz:{label:"Froiz",color:"#00843d",emoji:"🛒",g:"super"},
+  coviran:{label:"Covirán",color:"#e2001a",emoji:"🛒",g:"super"},condis:{label:"Condis",color:"#e3000f",emoji:"🛒",g:"super"},caprabo:{label:"Caprabo",color:"#e30613",emoji:"🛒",g:"super"},bonpreu:{label:"Bonpreu / Esclat",color:"#e2001a",emoji:"🛒",g:"super"},
+  spar:{label:"Spar",color:"#00843d",emoji:"🛒",g:"super"},masymas:{label:"Masymas",color:"#e30613",emoji:"🛒",g:"super"},hiperdino:{label:"HiperDino",color:"#0072bc",emoji:"🛒",g:"super"},familycash:{label:"Family Cash",color:"#e30613",emoji:"🛒",g:"super"},
+  supeco:{label:"Supeco",color:"#ffcc00",emoji:"🛒",g:"super"},costco:{label:"Costco",color:"#005daa",emoji:"📦",g:"super"},makro:{label:"Makro",color:"#003d7c",emoji:"📦",g:"super"},amazon:{label:"Amazon Fresh",color:"#ff9900",emoji:"📦",g:"super"},
+  mercado:{label:"Mercado municipal",color:"#8d6e63",emoji:"🏛️",g:"barrio"},carniceria:{label:"Carnicería",color:"#c0392b",emoji:"🥩",g:"barrio",cat:"carne"},polleria:{label:"Pollería",color:"#e67e22",emoji:"🍗",g:"barrio",cat:"carne"},
+  charcuteria:{label:"Charcutería",color:"#a04000",emoji:"🥓",g:"barrio",cat:"carne"},pescaderia:{label:"Pescadería",color:"#2980b9",emoji:"🐟",g:"barrio",cat:"pescado"},fruteria:{label:"Frutería",color:"#27ae60",emoji:"🍎",g:"barrio",cat:"fruta"},
+  panaderia:{label:"Panadería",color:"#d68910",emoji:"🥖",g:"barrio",cat:"panaderia"},drogueria:{label:"Droguería / perfumería",color:"#1abc9c",emoji:"🧴",g:"barrio",cat:"limpieza"},barrio:{label:"Tienda de barrio",color:"#7f8c8d",emoji:"🏪",g:"barrio"},
+  other:{label:"Otro",color:"#95a5a6",emoji:"🏪",g:"otro"}
+};
+function superOpts(){
+  var groups=[["super","Supermercados"],["barrio","Comercio de barrio"],["otro","Otros"]];
+  return groups.map(function(g){return'<optgroup label="'+g[1]+'">'+Object.entries(SUPERS).filter(function(e){return e[1].g===g[0]}).map(function(e){return'<option value="'+e[0]+'">'+e[1].emoji+" "+e[1].label+'</option>'}).join("")+'</optgroup>'}).join("")
+}
+var CATS={fruta:{label:"Fruta",icon:"🍎",color:"#e74c3c"},verdura:{label:"Verdura",icon:"🥦",color:"#27ae60"},carne:{label:"Carne",icon:"🥩",color:"#c0392b"},pescado:{label:"Pescado",icon:"🐟",color:"#2980b9"},lacteos:{label:"Lácteos",icon:"🥛",color:"#f39c12"},panaderia:{label:"Panadería",icon:"🍞",color:"#e67e22"},bebidas:{label:"Bebidas",icon:"🥤",color:"#9b59b6"},limpieza:{label:"Limpieza",icon:"🧹",color:"#1abc9c"},higiene:{label:"Higiene",icon:"🧴",color:"#3498db"},congelados:{label:"Congelados",icon:"🧊",color:"#00bcd4"},despensa:{label:"Despensa",icon:"🥫",color:"#8d6e63"},otros:{label:"Otros",icon:"📦",color:"#95a5a6"}};
+var profiles=[],trips=[],alerts=[],selP=null,selPer="month",selSup="all",editTId=null,curItems=[],editIIdx=null,ppMode="new",confCb=null,tesOk=false,catTouched=false;
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,9)}
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
 function cur(n){return Number(n||0).toFixed(2)+" €"}
@@ -341,7 +358,7 @@ function loadAll(){
   selPer=(ui&&ui.selPer)?ui.selPer:"month";
   selSup=(ui&&ui.selSup)?ui.selSup:"all";
   var se=document.getElementById("tSuper");
-  se.innerHTML=Object.entries(SUPERS).map(function(e){return'<option value="'+e[0]+'">'+e[1].emoji+" "+e[1].label+'</option>'}).join("");
+  se.innerHTML=superOpts();
   var ce=document.getElementById("iCat");
   ce.innerHTML=Object.entries(CATS).map(function(e){return'<option value="'+e[0]+'">'+e[1].icon+" "+e[1].label+'</option>'}).join("");
   document.getElementById("tDate").valueAsDate=new Date();
@@ -354,7 +371,7 @@ function buildPS(){
   if(profiles.length>1)el.innerHTML+='<option value="'+ALL_ID+'">🔀 Vista conjunta (todos)</option>';
   el.value=selP
 }
-function buildSF(){var el=document.getElementById("superFilter");el.innerHTML='<option value="all">Todos</option>'+Object.entries(SUPERS).map(function(e){return'<option value="'+e[0]+'">'+e[1].emoji+" "+e[1].label+'</option>'}).join("");el.value=selSup}
+function buildSF(){var el=document.getElementById("superFilter");el.innerHTML='<option value="all">Todas</option>'+superOpts();el.value=selSup}
 function onChangeProfile(){selP=document.getElementById("profileSelect").value;saveU();refresh()}
 function onChangePeriod(){selPer=document.getElementById("periodSelect").value;saveU();refresh()}
 function onChangeFilter(){selSup=document.getElementById("superFilter").value;saveU();refresh()}
@@ -443,9 +460,9 @@ function addItem(){
   if(editIIdx!==null){curItems[editIIdx]=item;editIIdx=null;document.getElementById("addIBtn").textContent="➕"}else{curItems.push(item)}
   renderIList();clearIF();updTot()
 }
-function editIF(idx){var it=curItems[idx];if(!it)return;document.getElementById("iName").value=it.name;document.getElementById("iCat").value=it.cat;document.getElementById("iQty").value=it.qty;document.getElementById("iUnit").value=it.unit;document.getElementById("iPrice").value=it.ppu;editIIdx=idx;document.getElementById("addIBtn").textContent="✅";prevI();document.getElementById("iName").focus()}
+function editIF(idx){var it=curItems[idx];if(!it)return;catTouched=true;document.getElementById("iName").value=it.name;document.getElementById("iCat").value=it.cat;document.getElementById("iQty").value=it.qty;document.getElementById("iUnit").value=it.unit;document.getElementById("iPrice").value=it.ppu;editIIdx=idx;document.getElementById("addIBtn").textContent="✅";prevI();document.getElementById("iName").focus()}
 function remItem(idx){curItems.splice(idx,1);if(editIIdx===idx){editIIdx=null;clearIF();document.getElementById("addIBtn").textContent="➕"}renderIList();updTot()}
-function clearIF(){document.getElementById("iName").value="";document.getElementById("iQty").value="1";document.getElementById("iPrice").value="";document.getElementById("iPrev").textContent=""}
+function clearIF(){catTouched=false;document.getElementById("iName").value="";document.getElementById("iQty").value="1";document.getElementById("iPrice").value="";document.getElementById("iPrev").textContent=""}
 function updTot(){var tot=curItems.reduce(function(s,i){return s+Number(i.tot||0)},0),show=curItems.length>0;document.getElementById("totRow").classList.toggle("hidden",!show);document.getElementById("ovWrap").classList.toggle("hidden",!show);if(show)document.getElementById("totVal").textContent=cur(tot)}
 function renderIList(){
   var el=document.getElementById("iList");
@@ -752,7 +769,11 @@ function parseRec(raw){
   var date=null;
   var mD=t.match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})\b/);
   if(mD){var yy=mD[3].length===2?"20"+mD[3]:mD[3];date=yy+"-"+mD[2].padStart(2,"0")+"-"+mD[1].padStart(2,"0")}
-  var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
+  var supPats=[["mercadona",/mercadona/i],["carrefour",/carrefour/i],["dia",/\bdia\b/i],["alcampo",/alcampo/i],["eroski",/eroski/i],["consum",/\bconsum\b/i],["ahorramas",/ahorramas/i],["lidl",/\blidl\b/i],["aldi",/\baldi\b/i],
+    ["hipercor",/hipercor/i],["supercor",/supercor/i],["elcorteingles",/corte.ingl/i],["bm",/supermercados\s+bm|\bbm\s+supermercados/i],["lupa",/\blupa\b/i],["gadis",/\bgadis\b/i],["froiz",/\bfroiz\b/i],
+    ["coviran",/covir[aá]n/i],["condis",/\bcondis\b/i],["caprabo",/caprabo/i],["bonpreu",/bon\s?preu|esclat/i],["spar",/\bspar\b/i],["masymas",/mas\s?y\s?mas|masymas/i],["hiperdino",/hiperdino/i],
+    ["familycash",/family\s?cash/i],["supeco",/supeco/i],["costco",/costco/i],["makro",/\bmakro\b/i],["amazon",/amazon/i]];
+  var sup="other";for(var si=0;si<supPats.length;si++){if(supPats[si][1].test(t)){sup=supPats[si][0];break}}
   var total=null;
   // Candidatos a total, por prioridad. Entre etiqueta y número se admite cualquier relleno
   // (puntos, rayas, "(€)"...) porque el OCR convierte los puntos guía en "———"
@@ -883,6 +904,33 @@ function normUnit(u){
   var map={kg:"kg",kilo:"kg",kilos:"kg",g:"g",gr:"g",gramo:"g",gramos:"g",l:"L",ltr:"L",litro:"L",litros:"L",cl:"L",ml:"ml",ud:"ud",uds:"ud",u:"ud",unidad:"ud",unidades:"ud",pack:"pack",bote:"bote"};
   return map[(u||"").toLowerCase().replace(/\.$/,"")]||"ud"
 }
+// ─── CATEGORÍA AUTOMÁTICA ─────────────────────────────────────────────────────
+// Orden importante: lo más específico primero ("tomate frito" → despensa antes que "tomate" → verdura)
+var CAT_RULES=[
+  ["congelados",/congelad|helado|\bhielo\b|varitas|empanadilla|croqueta/],
+  ["limpieza",/detergente|lavavajillas|suavizante|lejia|friegasuelos|limpia|fregona|bayeta|estropajo|papel (de )?cocina|rollo cocina|servilleta|bolsas? (de )?basura|ambientador|insecticida|quitagrasas|amoniaco|quitamanchas/],
+  ["higiene",/jabon|\bgel\b|champu|acondicionador|desodorante|pasta (de )?dientes|dentifrico|cepillo|cuchilla|maquinilla|compresa|tampon|panal|toallita|papel higienico|colonia|algodon|bastoncillo|enjuague|colutorio|crema (corporal|facial|de manos)|protector solar|espuma (de )?afeitar/],
+  ["bebidas",/\bagua\b|cerveza|\bvino\b|refresco|\bcola\b|zumo|gaseosa|tonica|bebida|sidra|licor|whisky|\bron\b|ginebra|nestea|aquarius|fanta|sprite|isotonic|\bcava\b|vermut|tinto de verano/],
+  ["despensa",/tomate (frito|triturado|natural)|\bpasta\b|espagueti|macarron|tallarin|fideo|arroz|aceite|vinagre|\bsal\b|azucar|harina|garbanzo|lenteja|alubia|\batun\b|sardina|conserva|caldo|\bsopa\b|\bcafe\b|\bte\b|infusion|cacao|colacao|galleta|cereal|chocolate|bombon|praline|turron|mermelada|\bmiel\b|mayonesa|ketchup|salsa|especia|pimienta|oregano|patatas fritas|snack|frutos secos|almendra|\bnuez|pipas|aceituna|levadura|gazpacho/],
+  ["pescado",/merluza|salmon|bacalao|dorada|lubina|gamba|langostino|mejillon|calamar|sepia|pulpo|boqueron|\brape\b|pescado|surimi|trucha|lenguado|almeja|berberecho|emperador|caballa/],
+  ["carne",/pollo|pechuga|ternera|cerdo|\blomo\b|chuleta|filete|hamburguesa|salchicha|hot ?dog|frankfurt|carne|picada|jamon|chorizo|salchichon|\bfuet\b|bacon|beicon|panceta|\bpavo\b|cordero|costilla|albondiga|embutido|mortadela|lacon|morcilla|solomillo|muslo|alita|contramuslo|secreto|presa iberica/],
+  ["lacteos",/leche|yogur|queso|mantequilla|\bnata\b|natillas|\bflan\b|kefir|cuajada|requeson|huevo|batido/],
+  ["panaderia",/\bpan\b|baguette|\bbarra\b|chapata|\bpicos\b|biscote|tostada|bolleria|croissant|cruasan|magdalena|bizcocho|donut|ensaimada|napolitana|palmera|bollo|rosquill|\bwrap/],
+  ["verdura",/tomate|lechuga|cebolla|\bajo|patata|zanahoria|pimiento|calabacin|berenjena|pepino|espinaca|brocoli|coliflor|judia verde|puerro|champinon|\bseta|calabaza|\bapio\b|ensalada|canonigo|rucula|\bcol\b|repollo|alcachofa|esparrago|remolacha|aguacate|verdura/],
+  ["fruta",/manzana|platano|\bpera|naranja|mandarina|limon|\buva|fresa|melon|sandia|\bkiwi|\bpina\b|melocoton|nectarina|ciruela|cereza|mango|papaya|frambuesa|arandano|granada|\bhigo|albaricoque|fruta/]
+];
+// 1) categoría que ya le diste a ese producto antes  2) palabras clave  3) categoría típica de la tienda  4) Otros
+function guessCat(name,sup){
+  var n=norm(name);if(!n)return"otros";
+  for(var i=0;i<trips.length;i++){var its=trips[i].items||[];for(var j=0;j<its.length;j++){if(its[j].cat&&its[j].cat!=="otros"&&norm(its[j].name)===n)return its[j].cat}}
+  for(var k=0;k<CAT_RULES.length;k++){if(CAT_RULES[k][1].test(n))return CAT_RULES[k][0]}
+  var s=SUPERS[sup];return(s&&s.cat)||"otros"
+}
+function autoCat(){
+  if(catTouched)return;
+  var n=document.getElementById("iName").value.trim();if(n.length<3)return;
+  document.getElementById("iCat").value=guessCat(n,document.getElementById("tSuper").value)
+}
 function applyOCR(p){
   if(p.date)document.getElementById("tDate").value=p.date;
   if(p.super)document.getElementById("tSuper").value=p.super;
@@ -890,7 +938,7 @@ function applyOCR(p){
     document.getElementById("detMode").checked=true;
     document.getElementById("qMode").classList.add("hidden");
     document.getElementById("dMode").classList.remove("hidden");
-    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:it.qty||1,unit:normUnit(it.unit),ppu:it.ppu||0,tot:it.tot||0}});
+    curItems=p.items.map(function(it){return{id:uid(),name:it.name,cat:guessCat(it.name,p.super),qty:it.qty||1,unit:normUnit(it.unit),ppu:it.ppu||0,tot:it.tot||0}});
     renderIList();updTot();
     // Auto-fill override total when ticket total ≠ sum of items (promotions/discounts)
     if(p.total){
@@ -924,7 +972,7 @@ function ocrDemo(){
   document.getElementById("detMode").checked=true;
   document.getElementById("qMode").classList.add("hidden");
   document.getElementById("dMode").classList.remove("hidden");
-  curItems=demo.map(function(it){return{id:uid(),name:it.name,cat:"otros",qty:1,unit:"ud",ppu:it.price,tot:it.price}});
+  curItems=demo.map(function(it){return{id:uid(),name:it.name,cat:guessCat(it.name,"mercadona"),qty:1,unit:"ud",ppu:it.price,tot:it.price}});
   renderIList();updTot();
   var pre=document.getElementById("ocrPre");
   pre.classList.remove("hidden");
