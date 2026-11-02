@@ -754,11 +754,14 @@ function parseRec(raw){
   if(mD){var yy=mD[3].length===2?"20"+mD[3]:mD[3];date=yy+"-"+mD[2].padStart(2,"0")+"-"+mD[1].padStart(2,"0")}
   var sup=/mercadona/i.test(t)?"mercadona":/carrefour/i.test(t)?"carrefour":/\bdia\b/i.test(t)?"dia":/ahorramas/i.test(t)?"ahorramas":/\blidl\b/i.test(t)?"lidl":/\baldi\b/i.test(t)?"aldi":/corte.ingles/i.test(t)?"elcorteingles":/amazon/i.test(t)?"amazon":"other";
   var total=null;
-  [/TOTAL\s+A\s+PAGAR\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/A\s*PAGAR\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i,/Total\s+(?:a\s+)?pagar[\s.]+(\d+[.,]\d{2})/i,/Total\s+venta\s+\w+[\s.]+(\d+[.,]\d{2})/i,/IMPORTE\s*[:\s]+(\d+[.,]\d{2})/i,/TOTAL\s*[:\s]+(\d+[.,]\d{2})\s*(?:EUR)?/i].forEach(function(p){
-    if(!total){
-      var m=normText.match(p)||t.match(p);
-      if(m)total=parseFloat(m[1].replace(",","."))
-    }
+  // Candidatos a total, por prioridad. Entre etiqueta y número se admite cualquier relleno
+  // (puntos, rayas, "(€)"...) porque el OCR convierte los puntos guía en "———"
+  var totalCands=[];
+  [/TOTAL\s+A\s+PAGAR[^\d\n]*(\d+[.,]\d{2})/gi,/\bA\s*PAGAR[^\d\n]*(\d+[.,]\d{2})/gi,/Total\s+venta\s+\w+[^\d\n]*(\d+[.,]\d{2})/gi,/IMPORTE[^\d\n]*(\d+[.,]\d{2})/gi,/\bTOTAL\b(?!\s+SIN)[^\d\n]*(\d+[.,]\d{2})/gi].forEach(function(p){
+    [normText,t].forEach(function(src){
+      var m;p.lastIndex=0;
+      while((m=p.exec(src))){var v=parseFloat(m[1].replace(",","."));if(v>0&&totalCands.indexOf(v)<0)totalCands.push(v)}
+    })
   });
   var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|^SIN PROMOCI)/i;
   var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
@@ -786,6 +789,8 @@ function parseRec(raw){
     // Cabecera con solo el nombre de la tienda: no debe pegarse al primer producto
     if(/^(?:DIA|MERCADONA|CARREFOUR(?:\s+EXPRESS|\s+MARKET)?|LIDL|ALDI|AHORRAMAS|EL CORTE INGLES|AMAZON(?:\s+FRESH)?)$/i.test(lnorm)){pendingName=null;return}
     if(/^[A-Z]\s+\d+%/i.test(lnorm)){pendingName=null;return}
+    // Desglose de IVA con la letra mal leída ("[o] 21% 0,12 € 0,03 €"): "%" seguido de importe
+    if(/\d{1,2}\s*%\s+\d/.test(lnorm)){pendingName=null;return}
     if(sup==="carrefour"&&/^(?:SUBTOTAL|20\s+ART\.\s+TOTAL\s+A\s+PAGAR|PAGADO\b|VENTAJAS\s+OBTENIDAS|TIPO\s+BASE\s+CUOTA|TARJETA\b|N\.AUTO|N\.OPER|COD\.RESPUESTA|MONEDA|VALIDACION|CHEQUE\s+CLUB\s+REDIMIDO|SOCIO\s+CLUB\s+CARREFOUR|SALDO\s+ACUMULADO|LE\s+ATENDIO)/i.test(lnorm)){
       carrefourItemsClosed=true
     }
@@ -794,7 +799,12 @@ function parseRec(raw){
       if(dm){pushDiscount(dm[1],dm[2]);pendingName=null;return}
     }
     if(carrefourItemsClosed){pendingName=null;return}
-    if(/-\d+[.,]\d+/.test(lnorm)){pendingName=null;return}
+    if(/-\d+[.,]\d+/.test(lnorm)){
+      // Promo en línea propia (DIA: "HOT DOG 150 G -0,51 €")
+      var ndm=lnorm.match(/^(.*[A-Za-z].*?)\s+-(\d+[.,]\d{2})\s*(?:EUR)?\s*$/i);
+      if(ndm)pushDiscount(ndm[1],ndm[2]);
+      pendingName=null;return
+    }
     var qm=/^(\d+(?:\.\d+)?)\s*(?:ud\.?|uds?|kg|gr?|ml|cl|l\.?)?\s*[xX\xd7]\s*\(?\s*(\d+[.,]\d{2,3})\s*\)?\s*(\d+[.,]\d{2})?\s*(?:EUR)?$/i.exec(lnorm);
     if(qm&&pendingName){
       pushItem(pendingName,num(qm[1]),"ud",num(qm[2]),qm[3]?num(qm[3]):null);
@@ -856,6 +866,17 @@ function parseRec(raw){
   });
   var seen={};
   items=items.filter(function(it){var k=[norm(it.name),it.qty,it.ppu,it.tot].join("|");if(seen[k])return false;seen[k]=true;return true});
+  // Elegir total: el de más prioridad, salvo que otro candidato cuadre exacto con productos − promos
+  // (el OCR a veces lee "6,04" como "0,04" en unas líneas y bien en otras)
+  var itemsSum=items.reduce(function(s,i){return s+i.tot},0),discSum=discounts.reduce(function(s,d){return s+d.amount},0);
+  var expected=Math.round((itemsSum-discSum)*100)/100;
+  if(totalCands.length){
+    total=totalCands[0];
+    if(items.length&&Math.abs(total-expected)>0.005){
+      var exact=totalCands.find(function(v){return Math.abs(v-expected)<=0.005});
+      if(exact)total=exact
+    }
+  } else if(items.length&&discSum>0&&expected>0){total=expected}
   return{date:date,super:sup,total:total,items:items,discounts:discounts}
 }
 function normUnit(u){
