@@ -785,8 +785,9 @@ function parseRec(raw){
     })
   });
   var skipPat=/^(?:TOTAL|IMPORTE|IVA|TARJETA|CAMBIO|FECHA|TICKET|FACTURA|GRACIAS|CAJA|CAJERO|EFECTIVO|SUBTOTAL|BASE|CUOTA|NIF|CIF|TEL[EF]|WWW|HTTP|BIENVENID|VOLV[EI]|DESGLOSE|DESCRIPCI|PRECIOKG|PRECIO.KG|CANTIDAD|VENTA.DIA|PRODUCTOS.VENDID|DESCARGAR|RESUMEN|FORMA.DE.PAGO|TARJETA.TEF|OFERTAS|^SIN PROMOCI)/i;
-  var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[ABab]?\s*$/i;
-  var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:\s*EUR)?\s+[\d.,]+\s*(?:\s*EUR)?\s*[ABab]?\s*$/i;
+  var rDiaData=/^(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:EUR)?\s*(?:[\d.,]+\s*(?:EUR)?\s*)?[A-Da-d]?\s*$/i;
+  // Letra de IVA DIA: A=4%, B=10%, C=21% (D por si acaso)
+  var rDiaFull=/^(.+?)\s+(\d+[.,]?\d*)\s*(kg|ud\.?|uds?|l\b|gr?\b|ml|cl)\s+(\d+[.,]\d+)\s*(?:\s*EUR)?\s+[\d.,]+\s*(?:\s*EUR)?\s*[A-Da-d]?\s*$/i;
   var rQtyPpuTotal=/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
   var rQtyPpuTotalNoName=/^(\d+(?:[.,]\d+)?)\s*(ud\.?|uds?|unid(?:ades?)?|u|kg|g|gr|l|ml|cl|pack|bote)\s+(\d+[.,]\d{2,3})\s*(?:EUR)?\s+(\d+[.,]\d{2})\s*(?:EUR)?\s*[A-Z*]?\s*$/i;
   var items=[],pendingName=null,discounts=[],carrefourItemsClosed=false;
@@ -810,8 +811,9 @@ function parseRec(raw){
     // Cabecera con solo el nombre de la tienda: no debe pegarse al primer producto
     if(/^(?:DIA|MERCADONA|CARREFOUR(?:\s+EXPRESS|\s+MARKET)?|LIDL|ALDI|AHORRAMAS|EL CORTE INGLES|AMAZON(?:\s+FRESH)?)$/i.test(lnorm)){pendingName=null;return}
     if(/^[A-Z]\s+\d+%/i.test(lnorm)){pendingName=null;return}
-    // Desglose de IVA con la letra mal leída ("[o] 21% 0,12 € 0,03 €"): "%" seguido de importe
-    if(/\d{1,2}\s*%\s+\d/.test(lnorm)){pendingName=null;return}
+    // Desglose de IVA con la letra mal leída ("[o] 21% 0,12 € 0,03 €"): solo si el "%" va al principio,
+    // para no tirar productos como "PECHUGA PAVO 92% 1ud 2,25 €"
+    if(/^(?:\S{1,4}\s+)?\d{1,2}\s*%\s+\d/.test(lnorm)){pendingName=null;return}
     if(sup==="carrefour"&&/^(?:SUBTOTAL|20\s+ART\.\s+TOTAL\s+A\s+PAGAR|PAGADO\b|VENTAJAS\s+OBTENIDAS|TIPO\s+BASE\s+CUOTA|TARJETA\b|N\.AUTO|N\.OPER|COD\.RESPUESTA|MONEDA|VALIDACION|CHEQUE\s+CLUB\s+REDIMIDO|SOCIO\s+CLUB\s+CARREFOUR|SALDO\s+ACUMULADO|LE\s+ATENDIO)/i.test(lnorm)){
       carrefourItemsClosed=true
     }
@@ -895,7 +897,13 @@ function parseRec(raw){
     total=totalCands[0];
     if(items.length&&Math.abs(total-expected)>0.005){
       var exact=totalCands.find(function(v){return Math.abs(v-expected)<=0.005});
-      if(exact)total=exact
+      if(exact)total=exact;
+      else{
+        // Si los productos cuadran con "Total sin promociones", el total impreso está mal leído
+        // (DIA: "16,67" leído como "16,07"): mandan productos − promos
+        var tspM=normText.match(/Total\s+sin\s+promoc\w*[^\d\n]*(\d+[.,]\d{2})/i);
+        if(tspM&&expected>0&&Math.abs(num(tspM[1])-itemsSum)<=0.005)total=expected
+      }
     }
   } else if(items.length&&discSum>0&&expected>0){total=expected}
   return{date:date,super:sup,total:total,items:items,discounts:discounts}
@@ -954,7 +962,13 @@ function applyOCR(p){
     pre.classList.remove("hidden");
     var _calcSum2=curItems.reduce(function(s,i){return s+Number(i.tot||0)},0);
     var _discSummary=(p.discounts&&p.discounts.length)?'<div style="background:#eef7ff;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#1a5276"><strong>Promos/descuentos detectados:</strong> '+p.discounts.map(function(d){return esc(d.name)+' (-'+d.amount.toFixed(2)+'€)'}).join(' · ')+'</div>':'';
-    var _discNote=(p.total&&Math.abs(_calcSum2-p.total)>0.005)?'<div style="background:#fff3e0;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#e65100">⚠️ Descuento detectado (−'+Math.abs(_calcSum2-p.total).toFixed(2)+'€). El total real ya está en el campo de abajo.</div>':'';
+    // Diferencia entre productos y total, descontando las promos ya detectadas
+    var _discSum=(p.discounts||[]).reduce(function(s,d){return s+d.amount},0);
+    var _gap=p.total?Math.round((_calcSum2-_discSum-p.total)*100)/100:0;
+    var _noteBox=function(txt){return '<div style="background:#fff3e0;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:12px;color:#e65100">⚠️ '+txt+' Se guarda el total del ticket.</div>'};
+    var _discNote=!p.total||Math.abs(_gap)<=0.005?'':
+      _gap<0?_noteBox('Faltan productos por valor de '+(-_gap).toFixed(2)+'€ (no se pudieron leer). Añádelos a mano o revisa el texto bruto.'):
+      _noteBox('Los productos suman '+_gap.toFixed(2)+'€ más que el total: hay descuentos sin identificar o algún precio mal leído.');
     pre.innerHTML="<strong>Detectados ("+p.items.length+"):</strong><br>"+
       p.items.map(function(it){var q=it.qty||1,u=it.unit||"ud",qLabel=(q!==1)?' <span style="color:#27ae60;font-size:11px">'+q+' '+u+'</span>':"";return'<div class="ocr-line"><span>'+esc(it.name)+qLabel+'</span><span>'+(it.tot||0).toFixed(2)+" EUR</span></div>"}).join("")+
       (p.total?'<div class="ocr-line"><span>TOTAL ticket</span><span>'+p.total.toFixed(2)+" EUR</span></div>":"")+_discSummary+_discNote
