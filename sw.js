@@ -4,7 +4,7 @@
  * Incrementa CACHE_VERSION para forzar actualización en todos los dispositivos.
  */
 
-const CACHE_VERSION  = "v1.2.2";
+const CACHE_VERSION  = "v1.2.3";
 const CACHE_NAME     = `gastos-super-${CACHE_VERSION}`;
 const CACHE_CDN      = `gastos-super-cdn-${CACHE_VERSION}`;
 

@@ -112,6 +112,7 @@ Netlify detecta el commit y actualiza la app. Arancha verá los cambios en su pr
 - ✅ Estadísticas: tendencia mensual, por categoría, por supermercado
 - ✅ Comparador automático de precios entre supermercados
 - ✅ Exportar Excel (hojas Compras y Productos) e importar Excel (solo totales por compra)
+- ✅ Copia de seguridad completa (.json): perfiles, compras con todos sus productos y avisos. Al restaurar se fusiona sin borrar nada
 - ✅ Funciona offline (Service Worker)
 - ✅ Instalable como PWA en móvil y escritorio
 

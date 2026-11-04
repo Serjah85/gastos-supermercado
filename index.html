@@ -257,6 +257,9 @@
           <button class="btn blue" type="button" onclick="exportXLS()">📊 Exportar Excel</button>
           <button class="btn sec" type="button" onclick="document.getElementById('impFile').click()">📥 Importar Excel</button>
           <input type="file" id="impFile" accept=".xlsx,.xls" onchange="importXLS(event)">
+          <button class="btn blue" type="button" onclick="exportBackup()">💾 Copia de seguridad</button>
+          <button class="btn sec" type="button" onclick="document.getElementById('bakFile').click()">♻️ Restaurar copia</button>
+          <input type="file" id="bakFile" onchange="importBackup(event)">
           <button class="btn danger" type="button" onclick="doReset()">🧨 Reset datos</button>
         </div>
       </form>
@@ -595,6 +598,57 @@ function importXLS(ev){
   };
   r.onerror=function(){alert("No se pudo leer el archivo.")};
   r.readAsArrayBuffer(f)
+}
+// ─── COPIA DE SEGURIDAD (JSON completo) ───────────────────────────────────────
+// Guarda todo: perfiles, compras con sus productos y avisos de precio. Sirve para
+// pasar los datos a otro móvil o recuperarlos si Safari borra el almacenamiento.
+function exportBackup(){
+  var data={app:"gastos-supermercado",version:1,exportedAt:new Date().toISOString(),profiles:profiles,trips:trips,alerts:alerts};
+  var name="GastosSuper_copia_"+new Date().toISOString().split("T")[0]+".json";
+  var json=JSON.stringify(data,null,1);
+  var file=null;try{file=new File([json],name,{type:"application/json"})}catch(e){}
+  // En iPhone, compartir deja guardarlo en Archivos/iCloud o mandarlo por WhatsApp
+  if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
+    navigator.share({files:[file],title:"Copia Gastos Super"}).catch(function(err){if(err&&err.name!=="AbortError")dlBlob(json,name)});
+    return
+  }
+  dlBlob(json,name)
+}
+function dlBlob(txt,name){
+  var url=URL.createObjectURL(new Blob([txt],{type:"application/json"}));
+  var a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);a.remove()},1000)
+}
+// Fusiona sin borrar nada: añade perfiles, compras y avisos que no estén ya (por id)
+function mergeBackup(d){
+  if(!d||d.app!=="gastos-supermercado"||!Array.isArray(d.trips)||!Array.isArray(d.profiles))throw new Error("formato");
+  // Móvil recién instalado: quitar el "Mi perfil" vacío que se crea solo
+  if(profiles.length===1&&!trips.some(function(t){return t.pid===profiles[0].id})&&d.profiles.length&&!d.profiles.some(function(p){return p.id===profiles[0].id}))profiles=[];
+  var has=function(arr){var m={};arr.forEach(function(x){m[x.id]=1});return m};
+  var hp=has(profiles),ht=has(trips),ha=has(alerts),n={p:0,t:0,a:0,dup:0};
+  d.profiles.forEach(function(p){if(p&&p.id&&!hp[p.id]){profiles.push(p);hp[p.id]=1;n.p++}});
+  d.trips.forEach(function(t){if(!t||!t.id)return;if(ht[t.id]){n.dup++;return}if(!hp[t.pid])return;trips.push(t);ht[t.id]=1;n.t++});
+  (d.alerts||[]).forEach(function(a){if(a&&a.id&&!ha[a.id]&&hp[a.pid]){alerts.push(a);ha[a.id]=1;n.a++}});
+  trips.sort(function(a,b){return new Date(b.date)-new Date(a.date)});
+  if(!profiles.some(function(p){return p.id===selP})&&selP!==ALL_ID)selP=profiles[0].id;
+  return n
+}
+function importBackup(ev){
+  var f=ev.target.files[0];ev.target.value="";if(!f)return;
+  var r=new FileReader();
+  r.onload=function(e){
+    var d;try{d=JSON.parse(e.target.result)}catch(err){alert("Ese archivo no es una copia de seguridad válida (.json de esta app).");return}
+    try{
+      var n=mergeBackup(d);
+      saveP();saveT();saveA();saveU();buildPS();refresh();
+      var msg="Copia restaurada ✅\n"+n.t+" compras nuevas";
+      if(n.p)msg+=", "+n.p+" perfiles nuevos";
+      if(n.dup)msg+="\n("+n.dup+" compras ya estaban y no se han tocado)";
+      alert(msg)
+    }catch(err){console.error(err);alert("Ese archivo no es una copia de seguridad de esta app.")}
+  };
+  r.onerror=function(){alert("No se pudo leer el archivo.")};
+  r.readAsText(f)
 }
 // ─── RESET ────────────────────────────────────────────────────────────────────
 function doReset(){showConf("🧨 Reset completo","Se borrarán TODOS los datos. No se puede deshacer.","🧨 Borrar todo",function(){[SK.p,SK.t,SK.a,SK.u].forEach(function(k){try{localStorage.removeItem(k)}catch(e){}});profiles=[];trips=[];alerts=[];selP=null;selPer="month";selSup="all";editTId=null;curItems=[];editIIdx=null;loadAll()})}
